@@ -16,7 +16,7 @@
         in {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              cargo rustc rustfmt clippy rust-analyzer
+              cargo rustc rustfmt clippy rust-analyzer stdenv.cc
               pkg-config vulkan-tools vulkan-validation-layers
             ];
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";

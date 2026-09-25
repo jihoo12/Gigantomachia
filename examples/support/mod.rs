@@ -62,14 +62,16 @@ impl Application for Demo {
             input.held(Key::ShiftLeft) || input.held(Key::ShiftRight),
         );
         // Example-specific clearance, not a physics/collision system.
-        let position = &mut self.scene.camera.position;
-        let floor = self
-            .ground
-            .map_or(0.0, |island| {
-                island.height_at(Vec2::new(position.x, position.z))
-            })
-            .max(0.0);
-        position.y = position.y.clamp(floor + 3.5, 80.0_f32.max(floor + 3.5));
+        if self.scene.water.is_some() || self.ground.is_some() {
+            let position = &mut self.scene.camera.position;
+            let floor = self
+                .ground
+                .map_or(0.0, |island| {
+                    island.height_at(Vec2::new(position.x, position.z))
+                })
+                .max(0.0);
+            position.y = position.y.clamp(floor + 3.5, 80.0_f32.max(floor + 3.5));
+        }
         if input.pressed(Key::Digit1) {
             self.scene.sun.shadows = !self.scene.sun.shadows;
         }
@@ -146,8 +148,12 @@ fn snapshot(scene: &Scene, path: &Path) -> EngineResult<()> {
     Ok(())
 }
 
-pub fn run(mut demo: Demo) -> EngineResult<()> {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
+#[allow(dead_code)] // The FBX viewer parses its model path before calling run_with_args.
+pub fn run(demo: Demo) -> EngineResult<()> {
+    run_with_args(demo, std::env::args().skip(1).collect())
+}
+
+pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> {
     args.retain(|arg| {
         match arg.as_str() {
             "--no-shadows" => demo.scene.sun.shadows = false,

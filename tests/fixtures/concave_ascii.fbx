@@ -1,0 +1,46 @@
+; FBX 7.4.0 project file
+; Original synthetic fixture, Apache-2.0.
+FBXHeaderExtension:  {
+    FBXHeaderVersion: 1003
+    FBXVersion: 7400
+    Creator: "Gigantomachia fixture generator"
+}
+GlobalSettings:  {
+    Version: 1000
+    Properties70:  {
+        P: "UpAxis", "int", "", "A", 1
+        P: "UpAxisSign", "int", "", "A", 1
+        P: "FrontAxis", "int", "", "A", 2
+        P: "FrontAxisSign", "int", "", "A", 1
+        P: "CoordAxis", "int", "", "A", 0
+        P: "CoordAxisSign", "int", "", "A", 1
+        P: "UnitScaleFactor", "double", "", "A", 1.0
+        P: "OriginalUnitScaleFactor", "double", "", "A", 1.0
+    }
+}
+Objects:  {
+    Geometry: 1000, "Geometry::TestMesh", "Mesh" {
+        GeometryVersion: 124
+        Vertices: *18 {
+            a: 0.0,0.0,0.0,200.0,0.0,0.0,200.0,100.0,0.0,100.0,100.0,0.0,100.0,200.0,0.0,0.0,200.0,0.0
+        }
+        PolygonVertexIndex: *6 {
+            a: 0,1,2,3,4,-6
+        }
+    }
+    Model: 101, "Model::Concave", "Mesh" {
+        Version: 232
+        Properties70:  {
+            P: "Lcl Translation", "Lcl Translation", "", "A", 0.0, 0.0, 0.0
+            P: "Lcl Scaling", "Lcl Scaling", "", "A", 1.0, 1.0, 1.0
+            P: "GeometricTranslation", "Vector3D", "", "A", 0.0, 0.0, 0.0
+            P: "Visibility", "Visibility", "", "A", 1.0
+        }
+        Shading: 1
+        Culling: "CullingOff"
+    }
+}
+Connections:  {
+    C: "OO", 1000, 101
+    C: "OO", 101, 0
+}

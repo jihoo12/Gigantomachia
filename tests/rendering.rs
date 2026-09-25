@@ -414,3 +414,34 @@ fn foam_tracks_shallow_depth_without_covering_dry_land_or_open_ocean() -> Engine
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn imported_fbx_uses_standard_mesh_rendering() -> EngineResult<()> {
+    let model =
+        gigantomachia::asset::load_fbx_bytes(include_bytes!("fixtures/static_scene_binary.fbx"))?;
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    let mut scene = Scene {
+        camera: Camera::looking_at(Vec3::new(9.0, 7.0, 12.0), Vec3::new(0.5, 2.0, 0.0))?,
+        ..Default::default()
+    };
+    let empty = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.meshes = model.meshes;
+    let imported = frame(&gpu, &mut renderer, &target, &scene)?;
+    let changed = empty
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(imported.as_chunks::<4>().0)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(changed > 500, "imported meshes must occupy visible pixels");
+    assert_eq!(renderer.resident_meshes(), 2);
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}

@@ -1,11 +1,11 @@
 # Engine Design
 
-Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. There is no editor, ECS, asset-file loader, physics system, or render graph yet.
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Static ASCII/binary FBX import produces the same opaque meshes. There is no editor, ECS, physics system, or render graph yet.
 
 ## Application, Scene, and Renderer
 
 ```text
-examples/water.rs or examples/island.rs
+examples/water.rs, examples/island.rs, or examples/fbx.rs
     builds Scene + implements Application through example support
                          |
                   app::run(application, config)
@@ -23,6 +23,7 @@ examples/water.rs or examples/island.rs
 | `app` / `input` | Event loop, window/surface lifecycle, elapsed time, input state | Wave playback policy, island generation, camera key bindings |
 | `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, sunlight, water parameters | Window or GPU handles |
 | `render` | Device setup, frame uniforms, shadow/HDR/depth targets, pipelines, mesh cache, submission, readback | Keyboard handling, demo state, procedural terrain algorithms |
+| `asset` | Static FBX parsing, coordinate conversion, CPU meshes, import diagnostics | GPU uploads, texture decoding, animation playback |
 | `terrain` | Seeded island heightfield and CPU mesh generation | Special terrain rendering code |
 | `examples/support` | Shared demo navigation, CLI, PNG encoding | Engine render passes |
 
@@ -59,9 +60,9 @@ fn main() -> EngineResult<()> {
 }
 ```
 
-For a mesh, construct `Mesh::new(vertices, indices)`, share it with `Arc<Mesh>`, and add `MeshInstance::new(mesh)` to `Scene::meshes`. `Island::mesh()` returns this same mesh type. There is no island branch in the renderer. The island example demonstrates terrain setup and an explicit camera target.
+For a mesh, construct `Mesh::new(vertices, indices)`, share it with `Arc<Mesh>`, and add `MeshInstance::new(mesh)` to `Scene::meshes`. `Island::mesh()` returns this same mesh type. `asset::load_fbx()` returns mesh instances ready to extend `Scene::meshes`; see the [FBX guide](fbx.md). There is no island or FBX branch in the renderer. The island example demonstrates terrain setup and an explicit camera target.
 
-`MeshInstance::set_transform` accepts finite, invertible affine transforms with a positive determinant. Normal matrices use inverse transpose, including nonuniform scale. Reflected transforms are rejected because the current opaque pipeline uses one CCW/back-face-culling configuration.
+`MeshInstance::set_transform` accepts finite, invertible affine transforms with a positive determinant. Normal matrices use inverse transpose, including nonuniform scale. FBX import bakes reflected source transforms and corrects winding before creating instances. Reflected runtime transforms are rejected because the current opaque pipeline uses one CCW/back-face-culling configuration.
 
 For tools or tests, create `Gpu::headless()`, `OffscreenTarget`, and `Renderer`; render a `Scene` into the target view and call `read_rgba8()`. The target format and dimensions must match the renderer. Readback blocks until GPU work completes and is intended for captures/tests, not each interactive frame. PNG is a development dependency used only by examples.
 

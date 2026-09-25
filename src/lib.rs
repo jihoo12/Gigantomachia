@@ -1,6 +1,7 @@
 //! Initial building blocks for a small 3D engine.
 
 pub mod app;
+pub mod asset;
 pub mod camera;
 pub mod input;
 pub mod mesh;
