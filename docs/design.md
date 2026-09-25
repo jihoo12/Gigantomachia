@@ -1,66 +1,96 @@
-# 3D Engine Design Draft
+# Engine Design
 
-## Goals
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional animated water surface. There is no editor, ECS, asset-file loader, physics system, or render graph yet.
 
-This is a library for building small, personal-scale 3D games entirely in Rust code.
+## Application, Scene, and Renderer
 
-The main ideas borrowed from Bevy are the separation of data and systems and a code-first execution model. The project does not aim to recreate a general-purpose plugin framework or parallel scheduler from the start.
+```text
+examples/water.rs or examples/island.rs
+    builds Scene + implements Application through example support
+                         |
+                  app::run(application, config)
+                  window lifecycle + Input + update
+                         |
+                  Renderer::render(gpu, target, scene)
+                  sky → opaque meshes → optional water
+                         |
+                  shared depth + queue submission
+```
 
-The initial target is Linux desktop with a single window, a single GPU, and forward rendering. The first concrete goal is an interactive water demo, before ECS or general-purpose scene construction.
-
-The first version will not include an editor, visual scripting, networking, physics, audio, animation, terrain, ray tracing, or a render graph.
-
-## Module Boundaries
-
-The project will initially be organized into modules within a single library. Modules can be split into separate crates later if necessary.
-
-| Module | Responsibility | Introduced |
+| Layer | Owns | Does not own |
 | --- | --- | --- |
-| `app` | winit lifecycle, surface, controls, demo clock | Implemented |
-| `camera` | Fly movement and perspective matrices | Implemented |
-| `render` | Shared Vulkan adapter/device initialization | Implemented |
-| `water` | Grid, uniforms, sky/water pipelines, depth | Implemented |
-| `scene` | Transform, Camera, MeshRenderer, ECS world | Future |
-| `input` | Standalone game input abstraction | Future; demo controls currently live in `app` |
-| `asset` | Handles, loading, GPU uploads | Future |
+| `Application` implementation | Scene construction, controls, animation, reset behavior, window title | GPU buffers, pipelines, surfaces |
+| `app` / `input` | Event loop, window/surface lifecycle, elapsed time, input state | Wave playback policy, island generation, camera key bindings |
+| `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, water parameters | Window or GPU handles |
+| `render` | Device setup, frame uniforms, depth, pipelines, mesh cache, submission, offscreen readback | Keyboard handling, demo state, procedural terrain algorithms |
+| `terrain` | Seeded island heightfield and CPU mesh generation | Special terrain rendering code |
+| `examples/support` | Shared demo navigation, CLI, PNG encoding | Engine render passes |
 
-In the future scene layer, game logic will modify ECS components, while the renderer will extract transforms and asset handles for drawing. The water demo directly supplies its camera and water settings to the renderer.
+The modules remain in one library crate. Separate crates, a general-purpose material system, and an ECS can be introduced when independent consumers require them. Engine source never imports example code.
 
-GPU resources are owned by renderer-side storage, and entities contain only handles to those resources.
+## Public API
 
-Systems will initially run on a single thread in an explicit order.
+A minimal application can use the renderer without touching wgpu:
 
-## Execution Flow
+```rust
+use gigantomachia::{
+    app::{self, AppAction, AppConfig, Application},
+    input::{Input, KeyCode},
+    render::EngineResult,
+    scene::Scene,
+    water::Water,
+};
 
-The water demo uses `input events → camera/clock update → sky pass → water pass → present`.
+struct Ocean { scene: Scene }
 
-- Camera motion uses elapsed time capped at 100 ms. The wave clock accumulates elapsed time multiplied by speed; changing speed does not jump the wave phase.
-- Pausing freezes only wave time. Camera motion and parameter controls remain active.
-- No gameplay simulation exists yet. A 60 Hz fixed-step accumulator is reserved for a future scene/physics layer.
-- Headless rendering accepts an explicit time, bypassing the event loop for reproducible captures.
-- Rendering stops for zero-sized or occluded windows. Resize reconfigures the surface and recreates depth storage.
-- Lost/outdated surfaces are reconfigured, timeouts are retried on a later frame, and other surface errors are reported before exit.
-- Focus loss clears held input, and suspend drops the window/surface resources for recreation on resume.
+impl Application for Ocean {
+    fn scene(&self) -> &Scene { &self.scene }
+
+    fn update(&mut self, input: &Input, dt: f32) -> AppAction {
+        if input.pressed(KeyCode::Escape) { return AppAction::Exit; }
+        if let Some(water) = &mut self.scene.water { water.time += dt; }
+        AppAction::Continue
+    }
+}
+
+fn main() -> EngineResult<()> {
+    let scene = Scene { water: Some(Water::default()), ..Default::default() };
+    app::run(Ocean { scene }, AppConfig::default())
+}
+```
+
+For a mesh, construct `Mesh::new(vertices, indices)`, share it with `Arc<Mesh>`, and add `MeshInstance::new(mesh)` to `Scene::meshes`. `Island::mesh()` returns this same mesh type. There is no island branch in the renderer. The island example demonstrates terrain setup and an explicit camera target.
+
+`MeshInstance::set_transform` accepts finite, invertible affine transforms with a positive determinant. Normal matrices use inverse transpose, including nonuniform scale. Reflected transforms are rejected because the current opaque pipeline uses one CCW/back-face-culling configuration.
+
+For tools or tests, create `Gpu::headless()`, `OffscreenTarget`, and `Renderer`; render a `Scene` into the target view and call `read_rgba8()`. The target format and dimensions must match the renderer. Readback blocks until GPU work completes and is intended for captures/tests, not each interactive frame. PNG is a development dependency used only by examples.
+
+## Resource Ownership and Lifetime
+
+- CPU meshes are immutable and have stable IDs. Cloning a `Scene` clones mesh `Arc`s, not vertex arrays.
+- The renderer uploads each distinct mesh once while it remains referenced by the current scene. Multiple instances reuse the same GPU geometry and have separate transform uniforms.
+- Mesh assets absent from the next rendered scene are evicted; instance uniform slots are resized to the current instance count. Removing and later re-adding a mesh uploads it again.
+- Frame resources and a single depth attachment belong to `Renderer`. Passes encode draw calls; only the renderer creates/submits the frame command buffer.
+- Suspend drops window/GPU resources but preserves application-owned CPU scene data. Resume recreates resources and uploads geometry as needed.
+
+This is a small forward renderer: no GPU instancing, visibility culling, batching, asynchronous asset streaming, or multi-scene cache is implemented yet.
+
+## Lifecycle and Timing
+
+`Input events → Application::update → Renderer::render → present`
+
+- Updates receive elapsed time capped at 100 ms. The host has no game simulation or wave clock. The examples accumulate `Water::time` using their own speed/pause state.
+- Held keys persist; press transitions and accumulated mouse motion are consumed once per update. Quick press/release taps survive until that update. Focus loss clears input.
+- Camera movement is reusable and unconstrained. Sea-level/terrain clearance is a demo policy in `examples/support`.
+- Zero-sized or occluded windows stop rendering. Resize reconfigures the surface and depth storage. Lost/outdated surfaces are reconfigured, timeouts are retried, and other surface errors exit with a message.
+- Headless rendering accepts explicit scene time. A 60 Hz fixed game update is still future work, not part of this refactor.
 
 ## 3D Conventions
 
-- The engine uses a right-handed coordinate system with Y-up. The camera looks along local -Z, and distances are measured in meters.
-- Rotations use quaternions, and transforms are composed as `translation * rotation * scale`.
-- Projection depth uses wgpu's 0..1 range. Depth comparison is `Less`, with a clear value of 1.0.
-- Mesh front faces use counter-clockwise winding, with back-face culling enabled by default.
-- Lighting calculations are performed in linear color space, while color textures and output use sRGB formats.
-- Initially, only a single perspective camera and opaque meshes are supported.
+Right-handed coordinates, Y-up, local camera forward -Z, meters, and column-vector matrices. Projection depth is 0..1, the depth comparison is `Less`, and depth clears to 1.0. Mesh triangles use CCW winding. Vertex colors and lighting are linear RGB; output targets are sRGB. One camera and opaque geometry are supported per frame.
 
-## Milestone Completion Criteria
+## Validation and Next Steps
 
-1. **Water Surface (implemented)**: Open a window with a perspective camera and depth buffer. Render a Gerstner-displaced grid with animated normals, procedural sky reflections, Fresnel reflectance, and sunlight highlights. Support camera navigation, pause/reset, amplitude/speed controls, resize, and deterministic headless PNG capture. Validate actual GPU rendering, animation, a zero-amplitude surface, and resized targets.
+CPU tests cover camera projection/movement, input transitions, mesh validation, grid winding, and deterministic terrain. Opt-in Vulkan integration tests use only the public engine API to check wave animation, zero-amplitude stability, resize/readback alignment, island visibility, shared geometry, transform updates, cache eviction, optional water, and depth occlusion above/below the surface.
 
-2. **Water in a Scene**: Add a simple submerged object or floor, sample scene color/depth for refraction and absorption, and use water depth for shoreline foam. Define above/below-water behavior before allowing the camera to submerge.
-
-3. **Scene Construction in Code**: Introduce a small ECS, reusable mesh/material handles, and a fixed-step game update. Keep the water renderer reusable as a scene element.
-
-4. **Real Assets and Measurement**: Load static glTF/GLB meshes and color textures. Measure CPU/GPU frame time, memory, and distribution size with a small scene before adding animation, PBR, or a render graph.
-
-Each milestone remains runnable as an example. Camera projection/movement and mesh winding have CPU tests. The opt-in Vulkan test renders frames, checks visible animation, verifies zero-amplitude stability, and exercises resize/readback alignment under wgpu validation. Visual quality is also checked with a rendered PNG.
-
-See [water rendering notes](water.md) for the current equations and limitations.
+The next water milestone is scene-color/depth sampling for refraction and absorption, followed by shoreline foam. The island currently adds visible land and depth occlusion; it does not implement those water effects. Reusable material/asset handles, ECS, and static glTF loading remain later work.

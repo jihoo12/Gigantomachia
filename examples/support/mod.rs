@@ -1,0 +1,165 @@
+//! Shared example controls and PNG/CLI conveniences, deliberately outside the engine.
+
+use gigantomachia::{
+    app::{self, AppAction, AppConfig, Application},
+    input::{Input, KeyCode as Key, MouseButton},
+    render::{EngineResult, Gpu, OffscreenTarget, Renderer},
+    scene::Scene,
+    terrain::Island,
+};
+use glam::{Vec2, Vec3};
+use std::{fs::File, io::BufWriter, path::Path};
+
+pub struct Demo {
+    pub scene: Scene,
+    initial: Scene,
+    name: &'static str,
+    ground: Option<Island>,
+    speed: f32,
+    paused: bool,
+}
+
+impl Demo {
+    pub fn new(name: &'static str, scene: Scene, ground: Option<Island>) -> Self {
+        Self {
+            initial: scene.clone(),
+            scene,
+            name,
+            ground,
+            speed: 1.0,
+            paused: false,
+        }
+    }
+}
+
+impl Application for Demo {
+    fn scene(&self) -> &Scene {
+        &self.scene
+    }
+
+    fn update(&mut self, input: &Input, dt: f32) -> AppAction {
+        if input.pressed(Key::Escape) {
+            return AppAction::Exit;
+        }
+        if input.pressed(Key::KeyR) {
+            self.scene = self.initial.clone();
+            self.speed = 1.0;
+            self.paused = false;
+            return AppAction::Continue;
+        }
+        if input.mouse_held(MouseButton::Right) {
+            let delta = input.mouse_delta();
+            self.scene.camera.look(delta.x, delta.y);
+        }
+        let pressed = |key| f32::from(input.held(key));
+        self.scene.camera.travel(
+            Vec3::new(
+                pressed(Key::KeyD) - pressed(Key::KeyA),
+                pressed(Key::KeyE) - pressed(Key::KeyQ),
+                pressed(Key::KeyW) - pressed(Key::KeyS),
+            ),
+            dt,
+            input.held(Key::ShiftLeft) || input.held(Key::ShiftRight),
+        );
+        // Example-specific clearance, not a physics/collision system.
+        let position = &mut self.scene.camera.position;
+        let floor = self
+            .ground
+            .map_or(0.0, |island| {
+                island.height_at(Vec2::new(position.x, position.z))
+            })
+            .max(0.0);
+        position.y = position.y.clamp(floor + 3.5, 80.0_f32.max(floor + 3.5));
+        if input.pressed(Key::Space) {
+            self.paused = !self.paused;
+        }
+        if input.pressed(Key::BracketRight) {
+            self.speed = (self.speed + 0.1).min(3.0);
+        }
+        if input.pressed(Key::BracketLeft) {
+            self.speed = (self.speed - 0.1).max(0.0);
+        }
+        if let Some(water) = &mut self.scene.water {
+            if input.pressed(Key::Equal) || input.pressed(Key::NumpadAdd) {
+                water.amplitude = (water.amplitude + 0.1).min(2.0);
+            }
+            if input.pressed(Key::Minus) || input.pressed(Key::NumpadSubtract) {
+                water.amplitude = (water.amplitude - 0.1).max(0.0);
+            }
+            if !self.paused {
+                water.time += dt * self.speed;
+            }
+        }
+        AppAction::Continue
+    }
+
+    fn title(&self) -> String {
+        format!(
+            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | RMB look · WASD move · Space pause",
+            self.name,
+            self.scene.water.map_or(0.0, |water| water.amplitude),
+            self.speed,
+            if self.paused { " | PAUSED" } else { "" }
+        )
+    }
+}
+
+fn snapshot(scene: &Scene, path: &Path) -> EngineResult<()> {
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let (width, height) = (1280, 720);
+    let target = OffscreenTarget::new(&gpu, width, height)?;
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, width, height)?;
+    renderer.render(&gpu, &target.view(), scene);
+    let pixels = target.read_rgba8(&gpu)?;
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    let mut encoder = png::Encoder::new(BufWriter::new(File::create(path)?), width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&pixels)?;
+    writer.finish()?;
+    println!("Saved {} using {}", path.display(), gpu.adapter_info.name);
+    Ok(())
+}
+
+pub fn run(mut demo: Demo) -> EngineResult<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => app::run(demo, AppConfig::default()),
+        [flag] if flag == "--help" => {
+            println!(
+                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit",
+                demo.name
+            );
+            Ok(())
+        }
+        [flag, count] if flag == "--frames" => app::run(
+            demo,
+            AppConfig {
+                frame_limit: Some(count.parse()?),
+                ..Default::default()
+            },
+        ),
+        [flag, path] if flag == "--headless" => {
+            if let Some(water) = &mut demo.scene.water {
+                water.time = 1.25;
+            }
+            snapshot(&demo.scene, Path::new(path))
+        }
+        [flag, path, time] if flag == "--headless" => {
+            let time: f32 = time.parse()?;
+            if !time.is_finite() || time < 0.0 {
+                return Err("snapshot time must be finite and nonnegative".into());
+            }
+            if let Some(water) = &mut demo.scene.water {
+                water.time = time;
+            }
+            snapshot(&demo.scene, Path::new(path))
+        }
+        _ => Err("invalid arguments; use --help for usage".into()),
+    }
+}

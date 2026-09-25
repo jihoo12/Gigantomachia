@@ -1,35 +1,65 @@
-//! Window lifecycle and controls for the first water demo.
+//! Generic application host. Demo-specific controls and scene construction live in examples.
 
-use std::{collections::HashSet, sync::Arc, time::Instant};
-
-use glam::Vec3;
+use crate::{
+    input::Input,
+    render::{EngineResult, Gpu, Renderer, instance},
+    scene::Scene,
+};
+use glam::Vec2;
+use std::{sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, MouseButton, WindowEvent},
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
+    keyboard::PhysicalKey,
     window::{Window, WindowId},
 };
 
-use crate::{
-    camera::Camera,
-    render::{EngineResult, Gpu, instance},
-    water::{WaterRenderer, WaterSettings},
-};
+pub enum AppAction {
+    Continue,
+    Exit,
+}
+
+/// Game code supplies CPU-side scene data and behavior; it never manages a surface or render pass.
+pub trait Application {
+    fn scene(&self) -> &Scene;
+    fn update(&mut self, input: &Input, dt: f32) -> AppAction;
+    fn title(&self) -> String {
+        "Gigantomachia".into()
+    }
+}
+
+pub struct AppConfig {
+    pub width: u32,
+    pub height: u32,
+    /// Exit after this many successful presentations, for smoke tests.
+    pub frame_limit: Option<u32>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 720,
+            frame_limit: None,
+        }
+    }
+}
 
 struct WindowState {
     surface: wgpu::Surface<'static>,
     window: Arc<Window>,
     gpu: Gpu,
     config: wgpu::SurfaceConfiguration,
-    renderer: WaterRenderer,
+    renderer: Renderer,
     drawable: bool,
     occluded: bool,
+    title: String,
 }
 
 impl WindowState {
-    async fn new(window: Arc<Window>) -> EngineResult<Self> {
+    async fn new(window: Arc<Window>, title: String) -> EngineResult<Self> {
         let instance = instance();
         let surface = instance.create_surface(window.clone())?;
         let (gpu, capabilities) = Gpu::with_surface(&instance, &surface).await?;
@@ -50,8 +80,8 @@ impl WindowState {
             alpha_mode: capabilities.alpha_modes[0],
             view_formats: vec![],
         };
+        let renderer = Renderer::new(&gpu, format, config.width, config.height)?;
         surface.configure(&gpu.device, &config);
-        let renderer = WaterRenderer::new(&gpu, format, config.width, config.height);
         eprintln!(
             "GPU: {} ({:?})",
             gpu.adapter_info.name, gpu.adapter_info.backend
@@ -62,99 +92,76 @@ impl WindowState {
             gpu,
             config,
             renderer,
+            title,
             drawable: size.width > 0 && size.height > 0,
             occluded: false,
         })
     }
 
-    fn resize(&mut self, width: u32, height: u32) {
+    fn resize(&mut self, width: u32, height: u32) -> EngineResult<()> {
         self.drawable = width > 0 && height > 0;
         if !self.drawable {
-            return;
+            return Ok(());
         }
+        self.renderer.resize(&self.gpu, width, height)?;
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.gpu.device, &self.config);
-        self.renderer.resize(&self.gpu, width, height);
+        Ok(())
     }
 
-    fn draw(
-        &self,
-        camera: &Camera,
-        settings: &WaterSettings,
-        time: f32,
-    ) -> Result<(), wgpu::SurfaceError> {
+    fn draw(&mut self, scene: &Scene) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
-        let view = frame.texture.create_view(&Default::default());
-        self.renderer.draw(&self.gpu, &view, camera, settings, time);
+        self.renderer.render(
+            &self.gpu,
+            &frame.texture.create_view(&Default::default()),
+            scene,
+        );
         self.window.pre_present_notify();
         frame.present();
         Ok(())
     }
 }
 
-struct WaterApp {
+struct Host<A> {
+    application: A,
+    options: AppConfig,
     state: Option<WindowState>,
-    camera: Camera,
-    settings: WaterSettings,
-    keys: HashSet<KeyCode>,
-    dragging: bool,
-    cursor: Option<(f64, f64)>,
+    input: Input,
     last_frame: Instant,
-    wave_time: f32,
-    frames_left: Option<u32>,
     error: Option<String>,
 }
 
-impl WaterApp {
+impl<A: Application> Host<A> {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl ToString) {
         self.error = Some(error.to_string());
         event_loop.exit();
-    }
-
-    fn clear_input(&mut self) {
-        self.keys.clear();
-        self.dragging = false;
-        self.cursor = None;
-    }
-
-    fn update_title(&self) {
-        if let Some(state) = &self.state {
-            state.window.set_title(&format!(
-                "Gigantomachia | Water | amplitude {:.1} | speed {:.1}{} | RMB look · WASD move · Space pause",
-                self.settings.amplitude, self.settings.speed,
-                if self.settings.paused { " | PAUSED" } else { "" },
-            ));
-        }
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
         self.last_frame = now;
-        let Some(state) = self.state.as_ref() else {
+        let Some(state) = self.state.as_mut() else {
             return;
         };
         if !state.drawable || state.occluded {
             return;
         }
-        let pressed = |code| f32::from(self.keys.contains(&code));
-        let axes = Vec3::new(
-            pressed(KeyCode::KeyD) - pressed(KeyCode::KeyA),
-            pressed(KeyCode::KeyE) - pressed(KeyCode::KeyQ),
-            pressed(KeyCode::KeyW) - pressed(KeyCode::KeyS),
-        );
-        self.camera.travel(
-            axes,
-            dt,
-            self.keys.contains(&KeyCode::ShiftLeft) || self.keys.contains(&KeyCode::ShiftRight),
-        );
-        if !self.settings.paused {
-            self.wave_time += dt * self.settings.speed;
+        let action = self.application.update(&self.input, dt);
+        self.input.end_frame();
+        if matches!(action, AppAction::Exit) {
+            event_loop.exit();
+            return;
         }
-        match state.draw(&self.camera, &self.settings, self.wave_time) {
+        let title = self.application.title();
+        if title != state.title {
+            state.window.set_title(&title);
+            state.title = title;
+        }
+        match state.draw(self.application.scene()) {
             Ok(()) => {
-                if let Some(frames) = &mut self.frames_left {
+                if let Some(frames) = &mut self.options.frame_limit {
                     *frames -= 1;
                     if *frames == 0 {
                         event_loop.exit();
@@ -170,24 +177,22 @@ impl WaterApp {
     }
 }
 
-impl ApplicationHandler for WaterApp {
+impl<A: Application> ApplicationHandler for Host<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_some() {
             return;
         }
+        let title = self.application.title();
         let result = event_loop
             .create_window(
                 Window::default_attributes()
-                    .with_title("Gigantomachia | Water")
-                    .with_inner_size(LogicalSize::new(1280.0, 720.0)),
+                    .with_title(&title)
+                    .with_inner_size(LogicalSize::new(self.options.width, self.options.height)),
             )
             .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
-            .and_then(|window| pollster::block_on(WindowState::new(Arc::new(window))));
+            .and_then(|window| pollster::block_on(WindowState::new(Arc::new(window), title)));
         match result {
-            Ok(state) => {
-                self.state = Some(state);
-                self.update_title();
-            }
+            Ok(state) => self.state = Some(state),
             Err(error) => self.fail(event_loop, error),
         }
         self.last_frame = Instant::now();
@@ -195,7 +200,7 @@ impl ApplicationHandler for WaterApp {
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         self.state = None;
-        self.clear_input();
+        self.input.clear();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
@@ -209,8 +214,10 @@ impl ApplicationHandler for WaterApp {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
-                if let Some(state) = &mut self.state {
-                    state.resize(size.width, size.height);
+                if let Some(state) = &mut self.state
+                    && let Err(error) = state.resize(size.width, size.height)
+                {
+                    self.fail(event_loop, error);
                 }
                 self.last_frame = Instant::now();
             }
@@ -220,60 +227,17 @@ impl ApplicationHandler for WaterApp {
                 }
                 self.last_frame = Instant::now();
             }
-            WindowEvent::Focused(false) => self.clear_input(),
-            WindowEvent::CursorLeft { .. } => {
-                self.dragging = false;
-                self.cursor = None;
-            }
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Right,
-                ..
-            } => {
-                self.dragging = state == ElementState::Pressed;
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                if self.dragging
-                    && let Some((x, y)) = self.cursor
-                {
-                    self.camera
-                        .look((position.x - x) as f32, (position.y - y) as f32);
-                }
-                self.cursor = Some((position.x, position.y));
-            }
+            WindowEvent::Focused(false) => self.input.clear(),
+            WindowEvent::CursorLeft { .. } => self.input.cursor_left(),
+            WindowEvent::MouseInput { state, button, .. } => self
+                .input
+                .mouse_button(button, state == ElementState::Pressed),
+            WindowEvent::CursorMoved { position, .. } => self
+                .input
+                .cursor(Vec2::new(position.x as f32, position.y as f32)),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    if event.state == ElementState::Released {
-                        self.keys.remove(&code);
-                        return;
-                    }
-                    self.keys.insert(code);
-                    if event.repeat {
-                        return;
-                    }
-                    match code {
-                        KeyCode::Escape => event_loop.exit(),
-                        KeyCode::Space => self.settings.paused = !self.settings.paused,
-                        KeyCode::Equal | KeyCode::NumpadAdd => {
-                            self.settings.amplitude = (self.settings.amplitude + 0.1).min(2.0)
-                        }
-                        KeyCode::Minus | KeyCode::NumpadSubtract => {
-                            self.settings.amplitude = (self.settings.amplitude - 0.1).max(0.0)
-                        }
-                        KeyCode::BracketRight => {
-                            self.settings.speed = (self.settings.speed + 0.1).min(3.0)
-                        }
-                        KeyCode::BracketLeft => {
-                            self.settings.speed = (self.settings.speed - 0.1).max(0.0)
-                        }
-                        KeyCode::KeyR => {
-                            self.camera = Camera::default();
-                            self.settings = WaterSettings::default();
-                            self.wave_time = 0.0;
-                        }
-                        _ => {}
-                    }
-                    self.update_title();
+                    self.input.key(code, event.state == ElementState::Pressed);
                 }
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop),
@@ -291,25 +255,20 @@ impl ApplicationHandler for WaterApp {
     }
 }
 
-/// Run the water demo. A frame limit is useful for checking surface presentation.
-pub fn run(frame_limit: Option<u32>) -> EngineResult<()> {
-    if frame_limit == Some(0) {
-        return Err("frame limit must be greater than zero".into());
+pub fn run(application: impl Application, options: AppConfig) -> EngineResult<()> {
+    if options.width == 0 || options.height == 0 || options.frame_limit == Some(0) {
+        return Err("window dimensions and frame limit must be greater than zero".into());
     }
-    let mut app = WaterApp {
+    let mut host = Host {
+        application,
+        options,
         state: None,
-        camera: Camera::default(),
-        settings: WaterSettings::default(),
-        keys: HashSet::new(),
-        dragging: false,
-        cursor: None,
+        input: Input::default(),
         last_frame: Instant::now(),
-        wave_time: 0.0,
-        frames_left: frame_limit,
         error: None,
     };
-    EventLoop::new()?.run_app(&mut app)?;
-    match app.error {
+    EventLoop::new()?.run_app(&mut host)?;
+    match host.error {
         Some(error) => Err(error.into()),
         None => Ok(()),
     }

@@ -1,0 +1,49 @@
+//! Renderable scene data. No window, GPU, or demo controls are stored here.
+
+use crate::{camera::Camera, mesh::Mesh, render::EngineResult, water::Water};
+use glam::Mat4;
+use std::sync::Arc;
+
+#[derive(Clone, Debug, Default)]
+pub struct Scene {
+    pub camera: Camera,
+    pub meshes: Vec<MeshInstance>,
+    pub water: Option<Water>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MeshInstance {
+    pub mesh: Arc<Mesh>,
+    transform: Mat4,
+}
+
+impl MeshInstance {
+    pub fn new(mesh: Arc<Mesh>) -> Self {
+        Self {
+            mesh,
+            transform: Mat4::IDENTITY,
+        }
+    }
+    pub fn transform(&self) -> Mat4 {
+        self.transform
+    }
+
+    /// Require an invertible affine transform with positive winding.
+    /// Reflected/negative-determinant transforms need a different culling pipeline.
+    pub fn set_transform(&mut self, transform: Mat4) -> EngineResult<()> {
+        if !transform.is_finite()
+            || !transform.inverse().is_finite()
+            || transform.determinant() <= 1e-8
+            || transform.x_axis.w != 0.0
+            || transform.y_axis.w != 0.0
+            || transform.z_axis.w != 0.0
+            || transform.w_axis.w != 1.0
+        {
+            return Err(
+                "mesh transform must be finite, affine, invertible, and preserve winding".into(),
+            );
+        }
+        self.transform = transform;
+        Ok(())
+    }
+}

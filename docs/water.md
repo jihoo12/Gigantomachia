@@ -23,18 +23,18 @@ displacement = (q * A * d.x * cos(phase),
 | 11 | 0.22 | (0.7, -0.6) |
 | 7 | 0.12 | (-0.8, -0.2) |
 
-The amplitude control multiplies all four amplitudes, with a range of 0–2. The maximum sum of vertical amplitudes is 2.94 meters; the demo camera stays above 3.5 meters. Analytic X/Z derivatives produce the geometric normal via `normalize(cross(tangent_z, tangent_x))`. Two short fragment-shader ripples add surface detail and fade with distance to reduce aliasing. Zero amplitude disables both displacement and ripples.
+In both examples, the amplitude control multiplies all four amplitudes, with a range of 0–2. The maximum sum of vertical amplitudes is 2.94 meters; the demo camera stays above 3.5 meters. Analytic X/Z derivatives produce the geometric normal via `normalize(cross(tangent_z, tangent_x))`. Two short fragment-shader ripples add surface detail and fade with distance to reduce aliasing. Zero amplitude disables both displacement and ripples.
 
 ## Shading
 
 - Draw a fullscreen sky triangle first, reconstructing view rays with the inverse view-projection matrix.
-- Draw the indexed water grid with CCW front faces, back-face culling, and a `Depth32Float` depth attachment.
+- Draw opaque scene meshes, then the indexed water grid with CCW front faces and back-face culling. All geometry shares the renderer-owned `Depth32Float` attachment, so water covers submerged geometry while visible land remains in front.
 - Reflect the camera ray about the water normal and sample the procedural sky function.
 - Use Schlick Fresnel with `F0 = 0.02037` to blend a deep teal body color into the reflection at grazing angles.
 - Add a directional sunlight highlight and a small crest-dependent color variation.
 - Apply simple exponential exposure compression in linear space, then let the sRGB target encode the output.
 
-The same WGSL module and pipelines render into window surfaces and offscreen textures. The headless example copies RGBA output into a row-aligned readback buffer and writes a PNG.
+The engine `Renderer` draws the same passes into window surfaces and offscreen textures. `Water` is scene data containing amplitude, explicit wave time, and mean sea level; speed and pause controls live in the examples. `OffscreenTarget` provides row-aligned GPU readback, while PNG encoding remains example-only. Shared uniforms, sky lighting, and tone mapping are defined in `common.wgsl`.
 
 ## Current Limits
 
@@ -53,11 +53,11 @@ Run these commands inside `nix develop path:.`:
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
-cargo test --locked --example water -- --ignored
+cargo test --locked --test rendering -- --ignored
 cargo run --locked --example water -- --headless /tmp/water.png 1.25
 cargo run --locked --example water -- --frames 10
 ```
 
-The opt-in GPU test checks wgpu validation, visible changes between two wave times, opaque output, a stable flat surface when amplitude is zero, and resizing to a portrait target with unaligned readback rows. It does not compare exact reference pixels across different drivers.
+The water integration test checks wgpu validation, visible changes between two wave times, opaque output, a stable flat surface when amplitude is zero, and resizing to a portrait target with unaligned readback rows. It does not compare exact reference pixels across different drivers.
 
 For an interactive check, resize the window, minimize/restore it, move in diagonal directions, lose focus while moving, pause and adjust the waves, and reset the scene. Confirm that camera movement is independent of wave pause and that zero amplitude produces a calm surface.

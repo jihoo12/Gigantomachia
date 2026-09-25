@@ -1,4 +1,4 @@
-//! A small above-water fly camera. All angles are in radians.
+//! Perspective fly camera independent of world bounds or input bindings.
 
 use glam::{Mat4, Vec3};
 
@@ -20,6 +20,19 @@ impl Default for Camera {
 }
 
 impl Camera {
+    /// Construct a camera aimed at a target, keeping the view away from the Y-axis singularity.
+    pub fn looking_at(position: Vec3, target: Vec3) -> crate::render::EngineResult<Self> {
+        let direction = target - position;
+        if !position.is_finite() || !direction.is_finite() || direction.length_squared() < 1e-8 {
+            return Err("camera requires finite, distinct position and target".into());
+        }
+        let direction = direction.normalize();
+        Ok(Self {
+            position,
+            yaw: direction.x.atan2(-direction.z),
+            pitch: direction.y.asin().clamp(-1.45, 1.45),
+        })
+    }
     pub fn forward(&self) -> Vec3 {
         Vec3::new(
             self.yaw.sin() * self.pitch.cos(),
@@ -40,8 +53,6 @@ impl Camera {
         self.position += (right * axes.x + Vec3::Y * axes.y + forward * axes.z).normalize_or_zero()
             * dt.clamp(0.0, 0.1)
             * if fast { 30.0 } else { 8.0 };
-        // The current shading model is only defined above the largest supported crest.
-        self.position.y = self.position.y.clamp(3.5, 80.0);
     }
 
     pub fn view_projection(&self, aspect: f32) -> Mat4 {
@@ -78,13 +89,13 @@ mod tests {
     }
 
     #[test]
-    fn camera_stays_above_water_and_avoids_vertical_singularity() {
+    fn camera_is_not_water_constrained_and_avoids_vertical_singularity() {
         let mut camera = Camera::default();
         camera.look(0.0, -100000.0);
         for _ in 0..100 {
             camera.travel(-Vec3::Y, 1.0, true);
         }
-        assert_eq!(camera.position.y, 3.5);
+        assert!(camera.position.y < 0.0);
         assert!(camera.view_projection(1.0).is_finite());
     }
 }

@@ -2,7 +2,7 @@
 
 A draft of a small 3D engine for building games entirely in code, without a GUI editor.
 
-The first milestone is **real-time water rendering**: a navigable ocean surface with Gerstner waves, analytic normals, procedural sky reflections, Fresnel reflectance, and sunlight highlights. No external assets or GUI editor are required. ECS and asset loading remain future work.
+The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, and sunlight highlights. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required; ECS and file-based asset loading remain future work.
 
 ## Technology Choices
 
@@ -21,6 +21,8 @@ Removing the editor does not make the initial Rust/wgpu build lightweight. The i
 ```sh
 # Include the flake even if it has not been added to Git yet.
 nix develop path:.
+cargo run --release --example island
+# The original ocean-only scene is still available.
 cargo run --release --example water
 ```
 
@@ -38,12 +40,13 @@ For a quicker development build, omit `--release`. Release builds improve CPU-si
 | R | Reset camera, waves, and time |
 | Esc | Exit |
 
-The window title displays amplitude, speed, and pause state. Camera height is restricted to 3.5–80 meters because underwater rendering is not implemented.
+Both examples share these controls. The window title displays amplitude, speed, and pause state. Example camera controls keep 3.5 meters of clearance above sea level or the island heightfield, with an 80-meter altitude limit. This is a navigation convenience, not a physics system; the engine camera itself has no water/terrain constraints.
 
 Headless rendering uses the same pipelines and does not need a display server:
 
 ```sh
 cargo run --example gpu_info
+cargo run --example island -- --headless /tmp/island.png
 cargo run --example water -- --headless /tmp/water.png
 # An optional time in seconds makes captures reproducible on the same GPU/driver.
 cargo run --example water -- --headless /tmp/water-t0.png 0
@@ -59,7 +62,7 @@ cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 # Opt-in test: requires a Vulkan adapter, but no display server.
-cargo test --example water -- --ignored
+cargo test --test rendering -- --ignored
 vulkaninfo --summary
 ```
 
@@ -67,7 +70,7 @@ The development shell targets `x86_64-linux` and `aarch64-linux`.
 
 GPU drivers/ICDs must be provided by the host system. On NixOS, enable `hardware.graphics.enable = true;` and configure the appropriate system driver for your GPU. On other Linux distributions, the distribution-provided GPU drivers and their integration with Nix libraries need to be verified separately.
 
-The `gpu_info` example and `water --headless` mode do not create a window. If a software Vulkan device is selected, it may report `Device type: Cpu`; the interactive demo is intended for a hardware GPU.
+The `gpu_info` example and both `--headless` modes do not create a window. If a software Vulkan device is selected, it may report `Device type: Cpu`; the interactive demo is intended for a hardware GPU.
 
 Dependencies are pinned using `flake.lock` and `Cargo.lock`.
 
@@ -76,19 +79,27 @@ The project uses the wgpu 27.0.1 series as its initial API baseline and does not
 ## Project Structure
 
 ```text
-src/app.rs            Window lifecycle, input, and demo clock
-src/camera.rs         Above-water fly camera
-src/render.rs         Shared Vulkan initialization
-src/water.rs          Water grid, uniforms, sky/water passes, depth
-src/shaders/water.wgsl  Gerstner displacement and water/sky shading
-examples/water.rs     Interactive demo, PNG capture, and GPU test
-examples/gpu_info.rs  Development environment verification
-flake.nix             Linux development shell
-docs/design.md        Architecture and milestones
-docs/water.md         Rendering model, limits, and validation
+src/app.rs             Generic Application host and window lifecycle
+src/input.rs           Held/pressed keys and accumulated mouse movement
+src/scene.rs           Camera, optional water, mesh instances
+src/mesh.rs            Validated immutable CPU geometry
+src/camera.rs          Perspective fly camera
+src/water.rs           Water parameters, independent of demo playback
+src/terrain.rs         Seeded island heightfield generator
+src/render/            GPU, frame renderer, mesh/water passes, readback
+src/shaders/           Shared lighting, sky, water, and mesh WGSL
+examples/water.rs      Ocean scene setup
+examples/island.rs     Island scene setup
+examples/support/     Demo controls, CLI, and PNG writing
+examples/gpu_info.rs   Development environment verification
+tests/rendering.rs     Public engine API GPU integration tests
+flake.nix              Linux development shell
+docs/design.md         Engine boundaries and extension guide
+docs/water.md          Water model and limitations
+docs/island.md         Island generation and limitations
 ```
 
-See the [design draft](docs/design.md) and [water rendering notes](docs/water.md).
+See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), and [island notes](docs/island.md). The renderer owns GPU resources and frame submission; examples only provide scene data and application behavior.
 
 Project documentation is written in English. Completed work is validated and committed to Git.
 
