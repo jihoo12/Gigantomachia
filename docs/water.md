@@ -23,7 +23,7 @@ displacement = (q * A * d.x * cos(phase),
 | 11 | 0.22 | (0.7, -0.6) |
 | 7 | 0.12 | (-0.8, -0.2) |
 
-In both examples, the amplitude control multiplies all four amplitudes, with a range of 0–2. The maximum sum of vertical amplitudes is 2.94 meters; the demo camera stays above 3.5 meters. Analytic X/Z derivatives produce the geometric normal via `normalize(cross(tangent_z, tangent_x))`. Two short fragment-shader ripples add surface detail and fade with distance to reduce aliasing. Zero amplitude disables both displacement and ripples.
+In both examples, the amplitude control multiplies all four amplitudes, with a range of 0–2. The maximum sum of vertical amplitudes is 2.94 meters; the demo camera stays above 3.5 meters. Analytic X/Z derivatives produce the geometric normal via `normalize(cross(tangent_z, tangent_x))`. Flowing irregular fragment-shader slopes add surface detail and fade with distance to reduce aliasing. Zero amplitude disables both displacement and ripples.
 
 ## Realistic Surface Option
 
@@ -42,7 +42,7 @@ Press `4` to switch between `Stylized` and `Realistic` while running. The defaul
 `Realistic` addresses broad, faceted-looking highlights with three changes:
 
 - A 512×512 cell mesh reduces spacing to 0.5 meters across the same patch. It contains 263,169 vertices and 524,288 triangles. The renderer allocates this additional grid on first use and retains it for subsequent toggles (about 8 MiB of vertex/index buffers). Camera recentering remains in one-meter increments for both styles.
-- Large-wave analytic normals are evaluated per fragment using interpolated, undisplaced wave coordinates. Eight directional short waves, from 3.1 m to 4.7 cm, use noise-modulated phases and strengths to break up regular bands and add shading detail without increasing displacement. Screen derivatives filter out unresolved ripples; distance fades detail near the horizon. Zero amplitude disables all of these waves.
+- Large-wave analytic normals are evaluated per fragment using interpolated, undisplaced wave coordinates. Four layers of analytic simplex-noise gradients, sampled at different scales, rotations, and drift velocities, add irregular shading detail without increasing displacement. These replace the crossed sine waves that produced woven-looking highlights. Screen derivatives filter out unresolved ripples; distance fades detail near the horizon. Zero amplitude disables all of these waves.
 - A GGX sun highlight replaces the artistic power highlight. Correlated Smith visibility and Schlick water Fresnel control the reflection; normal variation across pixels broadens the highlight to reduce sparkle aliasing. The reflected sky excludes its sharp sun disk to avoid counting direct sunlight twice. A darker body tint and restrained backlighting reduce the broad turquoise bands.
 
 The direct specular equations follow the microfacet model described in [Filament's material reference](https://google.github.io/filament/main/filament.html). Sun intensity and scattering are still artistic choices; this option is not a physically complete ocean simulation. Sky reflection is not prefiltered by roughness, and the lighting is not calibrated to physical exposure units.
@@ -59,6 +59,39 @@ let water = Water {
 ```
 
 `ripple_strength` changes short-wave slopes (0–2), and `roughness` controls the direct sun highlight (0.08–0.6, perceptual). These fields only affect the realistic style. Non-finite values fall back to their defaults during upload. The extra vertices and fragment calculations cost GPU time; use the toggle to choose the desired quality on your hardware.
+
+## Flowing Surface Detail
+
+Both styles now use irregular gradient fields rather than repeating crossed sine ripples. Each layer uses the analytic derivative of a compact kernel on a simplex lattice. Layers have different scales, rotations, offsets, and drift velocities; the sampled slopes are rotated back into world coordinates before blending. Screen-space derivatives attenuate detail smaller than a pixel. This produces moving patches of reflection instead of long, regularly intersecting highlight bands. The four large displacement waves remain unchanged for ocean scenes.
+
+[Three.js Water](https://github.com/mrdoob/three.js/blob/dev/examples/jsm/objects/Water.js) combines scrolling normal-map samples and a separately rendered planar reflection. This engine uses procedural slope fields, without importing its shader or texture. It still reflects only the procedural sky: scene-object reflections remain a separate future improvement. This change does not claim parity with Three.js or Unreal water rendering.
+
+## Water on a Board
+
+```sh
+cargo run --release --example water_board
+cargo run --example water_board -- --headless /tmp/water-board.png 1.25
+```
+
+The example places a shallow rectangular surface on an elevated wooden board. Alternating slats remain visible through refraction; a raised wooden rim covers the water edges. It starts with realistic shading, small waves, and foam disabled. The standard pause, camera, style, and effect controls apply. Navigation is unconstrained in this bounded-water example.
+
+```rust
+use gigantomachia::water::{Water, WaterBounds};
+use glam::Vec2;
+
+let bounds = WaterBounds::new(Vec2::ZERO, Vec2::new(3.82, 2.32))?;
+let water = Water {
+    bounds: Some(bounds),
+    level: 1.55,
+    amplitude: 0.12,
+    foam_strength: 0.0,
+    ..Water::default()
+};
+```
+
+`WaterBounds` specifies a fixed world-XZ center and positive half extents in meters. `None` retains the camera-following ocean. A bounded surface stretches the existing grid over its rectangle, disables horizontal Gerstner displacement, and omits the ocean-edge haze. Its vertical wave motion and normals remain consistent, and it keeps the existing refraction and shadow passes. Bounds validation rejects non-finite or non-positive dimensions.
+
+This is a horizontal surface, not a simulated volume. There are no transparent side faces, container collision, spilling, or fluid flow. The board rim is ordinary opaque geometry. Raising the wave amplitude too far can intersect the bottom or extend above the rim; the initial depth and amplitude avoid this. Only one water surface is supported per scene.
 
 ## Render Passes and Color Space
 
@@ -106,6 +139,7 @@ There is no shoreline texture or island-specific branch. Any submerged mesh appr
 
 | Field | Default | Behavior |
 | --- | --- | --- |
+| `bounds` | `None` | Optional fixed rectangular surface in world XZ |
 | `style` | `WaterStyle::Stylized` | Selects the existing or realistic surface |
 | `ripple_strength` | `1.0` | Realistic short-wave slope multiplier, clamped to 0–2 |
 | `roughness` | `0.22` | Realistic sun-highlight perceptual roughness, clamped to 0.08–0.6 |
@@ -140,6 +174,6 @@ cargo run --locked --example island -- --headless /tmp/island-base.png 1.25 --no
 cargo run --locked --example water -- --frames 10
 ```
 
-Opt-in Vulkan integration tests cover existing scene/resource behavior plus cast shadows on land/water, stale shadow removal, shallow transmission, increased absorption with depth, refraction strength, shallow-only animated foam, dry-land/open-ocean preservation, and resize equivalence to a fresh renderer. A realistic-water test additionally covers style switching, ripple/roughness controls, animation, zero-amplitude stability, interaction with refraction/foam/shadows, and resize equivalence. Output remains opaque RGBA because transmission is composed in the shader, not through alpha blending. Tests do not compare exact reference pixels across different drivers.
+Opt-in Vulkan integration tests cover existing scene/resource behavior plus cast shadows on land/water, stale shadow removal, shallow transmission, increased absorption with depth, refraction strength, shallow-only animated foam, dry-land/open-ocean preservation, and resize equivalence to a fresh renderer. A realistic-water test additionally covers style switching, ripple/roughness controls, animation, zero-amplitude stability, interaction with refraction/foam/shadows, and resize equivalence. A bounded-water test checks elevated placement, color transmission, fixed boundaries after camera motion, and both surface styles. Output remains opaque RGBA because transmission is composed in the shader, not through alpha blending. Tests do not compare exact reference pixels across different drivers.
 
 For an interactive check, resize the window, minimize/restore it, move in diagonal directions, lose focus while moving, pause and adjust the waves, and reset the scene. Confirm that camera movement is independent of wave pause and that zero amplitude produces a calm surface.

@@ -12,7 +12,8 @@ fn wave(point: vec2<f32>, direction: vec2<f32>, wavelength: f32, height: f32) ->
     let phase = k * dot(d, point) - sqrt(9.81 * k) * scene.camera_time.w;
     let s = sin(phase);
     let c = cos(phase);
-    let q = 0.45;
+    // Confined water moves vertically so it cannot drift outside its rectangle.
+    let q = select(0.45, 0.0, scene.water_bounds.z > 0.0);
     var out: WaveSample;
     out.displacement = vec3<f32>(q * amplitude * d.x * c, amplitude * s, q * amplitude * d.y * c);
     out.tangent_x = vec3<f32>(-q * amplitude * k * d.x * d.x * s, amplitude * k * d.x * c, -q * amplitude * k * d.x * d.y * s);
@@ -28,7 +29,10 @@ struct WaterVertex {
 }
 
 @vertex fn vs_main(@location(0) grid: vec2<f32>) -> WaterVertex {
-    let point = grid + scene.water.yz;
+    var point = grid + scene.water.yz;
+    if scene.water_bounds.z > 0.0 {
+        point = scene.water_bounds.xy + (grid / 128.0) * scene.water_bounds.zw;
+    }
     let a = wave(point, vec2<f32>(0.9, 0.35), 38.0, 0.75);
     let b = wave(point, vec2<f32>(-0.4, 0.9), 19.0, 0.38);
     let c = wave(point, vec2<f32>(0.7, -0.6), 11.0, 0.22);
@@ -72,18 +76,41 @@ fn noise(point: vec2<f32>) -> f32 {
         mix(hash(cell + vec2<f32>(0.0, 1.0)), hash(cell + vec2<f32>(1.0)), t.x), t.y);
 }
 
-// Short waves affect shading only. Fade wavelengths that approach the pixel footprint.
-fn small_wave(point: vec2<f32>, direction: vec2<f32>, wavelength: f32, slope: f32, offset: f32) -> vec2<f32> {
-    let d = normalize(direction);
-    let k = 2.0 * PI / wavelength;
-    // Smooth phase variation breaks the long, perfectly repeating interference bands.
-    let noise_point = point * (0.45 / wavelength) + vec2<f32>(offset, scene.camera_time.w * 0.07);
-    let phase = k * dot(point, d) - sqrt(9.81 * k) * scene.camera_time.w + offset
-        + 4.0 * noise(noise_point);
-    let envelope = 0.65 + 0.35 * noise(noise_point * 0.63 + vec2<f32>(7.3, 2.1));
-    let footprint = length(vec2<f32>(dpdx(phase), dpdy(phase)));
-    let resolved = 1.0 - smoothstep(0.7, 2.6, footprint);
-    return d * cos(phase) * slope * envelope * resolved;
+// Analytic gradient of a compact radial kernel on a simplex lattice.
+// Unlike crossed sine waves, this produces short, irregular ridges without long repeated bands.
+fn gradient_corner(cell: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
+    let angle = hash(cell) * (2.0 * PI);
+    let g = vec2<f32>(cos(angle), sin(angle));
+    let weight = max(0.5 - dot(offset, offset), 0.0);
+    let w2 = weight * weight;
+    return w2 * w2 * g - 8.0 * w2 * weight * dot(g, offset) * offset;
+}
+
+fn slope_noise(point: vec2<f32>) -> vec2<f32> {
+    let cell = floor(point + (point.x + point.y) * 0.3660254);
+    let a = point - cell + (cell.x + cell.y) * 0.21132487;
+    let step_cell = select(vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), a.x > a.y);
+    let b = a - step_cell + vec2<f32>(0.21132487);
+    let c = a - vec2<f32>(0.57735026);
+    return 70.0 * (gradient_corner(cell, a) + gradient_corner(cell + step_cell, b)
+        + gradient_corner(cell + vec2<f32>(1.0), c));
+}
+
+fn flowing_layer(point: vec2<f32>, scale: f32, drift: vec2<f32>, axis: vec2<f32>) -> vec2<f32> {
+    let rotation = mat2x2<f32>(axis, vec2<f32>(-axis.y, axis.x));
+    let coordinate = rotation * point * scale + drift * scene.camera_time.w;
+    let footprint = max(length(dpdx(coordinate)), length(dpdy(coordinate)));
+    let resolved = 1.0 - smoothstep(0.12, 0.55, footprint);
+    // Transform the sampled slope back to world space before combining layers.
+    return transpose(rotation) * slope_noise(coordinate) * resolved;
+}
+
+fn flowing_ripples(point: vec2<f32>) -> vec2<f32> {
+    var slope = flowing_layer(point, 0.65, vec2<f32>(0.10, 0.04), vec2<f32>(0.8, 0.6)) * 0.028;
+    slope += flowing_layer(point + vec2<f32>(13.7, 4.2), 1.51, vec2<f32>(-0.08, 0.13), vec2<f32>(0.6, -0.8)) * 0.018;
+    slope += flowing_layer(point + vec2<f32>(-6.2, 19.8), 3.73, vec2<f32>(0.17, 0.09), vec2<f32>(0.3846154, 0.9230769)) * 0.010;
+    slope += flowing_layer(point + vec2<f32>(21.1, -8.3), 8.91, vec2<f32>(-0.14, -0.19), vec2<f32>(-0.9230769, 0.3846154)) * 0.005;
+    return slope;
 }
 
 fn detailed_normal(point: vec2<f32>, world: vec3<f32>, distance: f32) -> vec3<f32> {
@@ -95,15 +122,8 @@ fn detailed_normal(point: vec2<f32>, world: vec3<f32>, distance: f32) -> vec3<f3
     let tx = vec3<f32>(1.0, 0.0, 0.0) + a.tangent_x + b.tangent_x + c.tangent_x + d.tangent_x;
     let tz = vec3<f32>(0.0, 0.0, 1.0) + a.tangent_z + b.tangent_z + c.tangent_z + d.tangent_z;
     let base = normalize(cross(tz, tx));
-    var slope = small_wave(world.xz, vec2<f32>(0.93, 0.37), 3.1, 0.065, 0.3);
-    slope += small_wave(world.xz, vec2<f32>(0.7, 0.72), 1.73, 0.055, 1.7);
-    slope += small_wave(world.xz, vec2<f32>(0.98, -0.2), 0.97, 0.055, 3.1);
-    slope += small_wave(world.xz, vec2<f32>(-0.35, 0.94), 0.53, 0.045, 2.2);
-    slope += small_wave(world.xz, vec2<f32>(0.82, 0.57), 0.29, 0.035, 4.7);
-    slope += small_wave(world.xz, vec2<f32>(0.55, -0.84), 0.16, 0.025, 0.9);
-    slope += small_wave(world.xz, vec2<f32>(0.99, 0.1), 0.09, 0.018, 5.6);
-    slope += small_wave(world.xz, vec2<f32>(-0.2, 0.98), 0.047, 0.012, 3.8);
-    slope *= scene.surface.y * scene.water.x * (1.0 - smoothstep(55.0, 115.0, distance));
+    let slope = flowing_ripples(world.xz) * scene.surface.y * scene.water.x
+        * (1.0 - smoothstep(55.0, 115.0, distance));
     return normalize(base - vec3<f32>(slope.x, 0.0, slope.y) * base.y);
 }
 
@@ -128,10 +148,7 @@ fn sun_glint(normal: vec3<f32>, view: vec3<f32>, alpha: f32) -> vec3<f32> {
     let view = normalize(scene.camera_time.xyz - in.world);
     let distance = length(scene.camera_time.xyz - in.world);
     let ripple_fade = 1.0 - smoothstep(15.0, 65.0, distance);
-    let ripple = vec2<f32>(
-        cos(dot(in.world.xz, vec2<f32>(2.1, 1.6)) - scene.camera_time.w * 2.3),
-        cos(dot(in.world.xz, vec2<f32>(-1.3, 2.6)) - scene.camera_time.w * 1.8)
-    ) * 0.045 * scene.water.x * ripple_fade;
+    let ripple = flowing_ripples(in.world.xz) * 0.5 * scene.water.x * ripple_fade;
     var normal = normalize(in.normal + vec3<f32>(ripple.x, 0.0, ripple.y));
     if scene.surface.x > 0.5 {
         normal = detailed_normal(in.wave_point, in.world, distance);
@@ -211,7 +228,8 @@ fn sun_glint(normal: vec3<f32>, view: vec3<f32>, alpha: f32) -> vec3<f32> {
     let foam = clamp(shore * (0.25 + 0.75 * foam_pattern) + contact * 0.3, 0.0, 1.0) * scene.effects.z;
     let foam_color = vec3<f32>(0.80, 0.88, 0.86) * (0.45 + 0.55 * visibility);
     color = mix(color, foam_color, foam);
-    let haze = smoothstep(65.0, 120.0, length(in.world.xz - scene.camera_time.xz));
+    let haze = select(smoothstep(65.0, 120.0, length(in.world.xz - scene.camera_time.xz)),
+        0.0, scene.water_bounds.z > 0.0);
     color = mix(color, sky(normalize(in.world - scene.camera_time.xyz)), haze);
     return vec4<f32>(color, 1.0);
 }

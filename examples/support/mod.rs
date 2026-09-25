@@ -87,7 +87,7 @@ impl Application for Demo {
             input.held(Key::ShiftLeft) || input.held(Key::ShiftRight),
         );
         // Example-specific clearance, not a physics/collision system.
-        if self.scene.water.is_some() || self.ground.is_some() {
+        if self.scene.water.is_some_and(|water| water.bounds.is_none()) || self.ground.is_some() {
             let position = &mut self.scene.camera.position;
             let floor = self
                 .ground

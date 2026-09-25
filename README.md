@@ -2,7 +2,7 @@
 
 A draft of a small 3D engine for building games entirely in code, without a GUI editor.
 
-The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. An optional realistic water style adds denser geometry, per-pixel wave normals, filtered fine ripples, and GGX sunlight. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
+The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. An optional realistic water style adds denser geometry, per-pixel wave normals, flowing irregular ripples, and GGX sunlight. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
 
 ## Technology Choices
 
@@ -25,6 +25,8 @@ nix develop path:.
 cargo run --release --example island
 # Enable more detailed water shading (press 4 to compare styles).
 cargo run --release --example water -- --realistic-water
+# Shallow water on a wooden board with a raised rim.
+cargo run --release --example water_board
 # The original ocean-only scene is still available.
 cargo run --release --example water
 # View the bundled FBX fixture, or provide your own model path.
@@ -103,6 +105,7 @@ src/terrain.rs         Seeded island heightfield generator
 src/render/            GPU, shadow/HDR/water passes, frame targets, readback
 src/shaders/           Lighting, shadows, refraction, foam, and tone mapping
 examples/water.rs      Ocean scene setup
+examples/water_board.rs Bounded shallow water on a wooden board
 examples/island.rs     Island scene setup
 examples/fbx.rs        FBX viewer with optional animation
 examples/support/     Demo controls, CLI, and PNG writing

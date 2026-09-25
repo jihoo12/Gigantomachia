@@ -587,3 +587,66 @@ fn realistic_water_toggle_detail_roughness_flat_surface_and_resize() -> EngineRe
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn bounded_water_stays_on_its_board_when_camera_moves() -> EngineResult<()> {
+    use gigantomachia::water::{WaterBounds, WaterStyle};
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    let mut board = MeshInstance::new(plane(12.0, 0.0, [0.65, 0.24, 0.06])?);
+    board.set_transform(Mat4::from_translation(Vec3::Y))?;
+    let mut scene = Scene {
+        meshes: vec![board],
+        ..Default::default()
+    };
+    let water = Water {
+        bounds: Some(WaterBounds::new(
+            glam::Vec2::new(2.0, -1.0),
+            glam::Vec2::new(2.0, 1.5),
+        )?),
+        level: 1.4,
+        amplitude: 0.12,
+        foam_strength: 0.0,
+        ..Default::default()
+    };
+    for camera in [Vec3::new(8.0, 8.0, 10.0), Vec3::new(-6.0, 9.0, 10.0)] {
+        scene.camera = Camera::looking_at(camera, Vec3::new(2.0, 1.0, -1.0))?;
+        scene.water = None;
+        let dry = frame(&gpu, &mut renderer, &target, &scene)?;
+        for style in [WaterStyle::Stylized, WaterStyle::Realistic] {
+            scene.water = Some(Water { style, ..water });
+            let wet = frame(&gpu, &mut renderer, &target, &scene)?;
+            let center = pixel_at(&scene.camera, Vec3::new(2.0, 1.4, -1.0), 320, 180);
+            assert_ne!(
+                &dry[center..center + 4],
+                &wet[center..center + 4],
+                "the elevated water must cover the board center"
+            );
+            for point in [
+                Vec3::new(-2.0, 1.4, -1.0),
+                Vec3::new(6.0, 1.4, -1.0),
+                Vec3::new(2.0, 1.4, 3.0),
+            ] {
+                let i = pixel_at(&scene.camera, point, 320, 180);
+                assert_eq!(
+                    &dry[i..i + 4],
+                    &wet[i..i + 4],
+                    "water must not extend outside its fixed rectangle"
+                );
+            }
+            scene.water.as_mut().unwrap().refraction = false;
+            assert_ne!(
+                wet,
+                frame(&gpu, &mut renderer, &target, &scene)?,
+                "the submerged board must transmit through water"
+            );
+        }
+    }
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}

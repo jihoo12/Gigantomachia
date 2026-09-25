@@ -31,6 +31,7 @@ struct FrameUniforms {
     effects: [f32; 4],
     absorption: [f32; 4],
     surface: [f32; 4],
+    water_bounds: [f32; 4],
 }
 
 pub struct Renderer {
@@ -337,6 +338,14 @@ impl Renderer {
                 water.foam_strength.clamp(0.0, 1.0),
                 water.foam_width.clamp(0.05, 10.0),
             ],
+            water_bounds: water.bounds.map_or([0.0; 4], |bounds| {
+                [
+                    bounds.center.x,
+                    bounds.center.y,
+                    bounds.half_extent.x,
+                    bounds.half_extent.y,
+                ]
+            }),
             surface: [
                 f32::from(detailed),
                 if water.ripple_strength.is_finite() {
