@@ -23,11 +23,11 @@ struct MeshVertex {
 
 @fragment fn fs_main(in: MeshVertex) -> @location(0) vec4<f32> {
     let normal = normalize(in.normal);
-    let diffuse = max(dot(normal, normalize(SUN)), 0.0);
+    let diffuse = max(dot(normal, scene.sun.xyz), 0.0);
     let ambient = mix(vec3<f32>(0.18, 0.20, 0.18), vec3<f32>(0.42, 0.50, 0.57), normal.y * 0.5 + 0.5);
-    var color = in.color * (ambient + vec3<f32>(1.0, 0.87, 0.68) * diffuse * 1.15);
+    var color = in.color * (ambient + vec3<f32>(1.0, 0.87, 0.68) * diffuse * 1.15 * shadow_visibility(in.world, normal));
     let ray = normalize(in.world - scene.camera_time.xyz);
     let haze = smoothstep(65.0, 120.0, length(in.world.xz - scene.camera_time.xz));
     color = mix(color, sky(ray), haze);
-    return vec4<f32>(tone_map(color), 1.0);
+    return vec4<f32>(color, 1.0);
 }

@@ -70,6 +70,9 @@ impl Application for Demo {
             })
             .max(0.0);
         position.y = position.y.clamp(floor + 3.5, 80.0_f32.max(floor + 3.5));
+        if input.pressed(Key::Digit1) {
+            self.scene.sun.shadows = !self.scene.sun.shadows;
+        }
         if input.pressed(Key::Space) {
             self.paused = !self.paused;
         }
@@ -80,6 +83,12 @@ impl Application for Demo {
             self.speed = (self.speed - 0.1).max(0.0);
         }
         if let Some(water) = &mut self.scene.water {
+            if input.pressed(Key::Digit2) {
+                water.refraction = !water.refraction;
+            }
+            if input.pressed(Key::Digit3) {
+                water.foam_strength = if water.foam_strength > 0.0 { 0.0 } else { 1.0 };
+            }
             if input.pressed(Key::Equal) || input.pressed(Key::NumpadAdd) {
                 water.amplitude = (water.amplitude + 0.1).min(2.0);
             }
@@ -95,11 +104,22 @@ impl Application for Demo {
 
     fn title(&self) -> String {
         format!(
-            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | RMB look · WASD move · Space pause",
+            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {}",
             self.name,
             self.scene.water.map_or(0.0, |water| water.amplitude),
             self.speed,
-            if self.paused { " | PAUSED" } else { "" }
+            if self.paused { " | PAUSED" } else { "" },
+            if self.scene.sun.shadows { "on" } else { "off" },
+            if self.scene.water.is_some_and(|w| w.refraction) {
+                "on"
+            } else {
+                "off"
+            },
+            if self.scene.water.is_some_and(|w| w.foam_strength > 0.0) {
+                "on"
+            } else {
+                "off"
+            }
         )
     }
 }
@@ -127,12 +147,30 @@ fn snapshot(scene: &Scene, path: &Path) -> EngineResult<()> {
 }
 
 pub fn run(mut demo: Demo) -> EngineResult<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    args.retain(|arg| {
+        match arg.as_str() {
+            "--no-shadows" => demo.scene.sun.shadows = false,
+            "--no-refraction" => {
+                if let Some(water) = &mut demo.scene.water {
+                    water.refraction = false;
+                }
+            }
+            "--no-foam" => {
+                if let Some(water) = &mut demo.scene.water {
+                    water.foam_strength = 0.0;
+                }
+            }
+            _ => return true,
+        }
+        false
+    });
+    demo.initial = demo.scene.clone();
     match args.as_slice() {
         [] => app::run(demo, AppConfig::default()),
         [flag] if flag == "--help" => {
             println!(
-                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit",
+                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam",
                 demo.name
             );
             Ok(())

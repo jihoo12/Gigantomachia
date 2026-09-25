@@ -3,13 +3,18 @@
 mod gpu;
 mod mesh;
 mod offscreen;
+mod shadow;
+mod targets;
 mod water;
 
 use crate::scene::Scene;
 use bytemuck::{Pod, Zeroable};
+use glam::Vec3;
 pub use gpu::{EngineResult, Gpu, instance};
 use mesh::MeshPass;
 pub use offscreen::OffscreenTarget;
+use shadow::ShadowMap;
+use targets::{HDR_FORMAT, SceneTargets};
 use water::{GRID_CELLS, GRID_EXTENT, WaterPass};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -19,8 +24,12 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 struct FrameUniforms {
     view_projection: [[f32; 4]; 4],
     inverse_view_projection: [[f32; 4]; 4],
+    light_view_projection: [[f32; 4]; 4],
     camera_time: [f32; 4],
     water: [f32; 4],
+    sun: [f32; 4],
+    effects: [f32; 4],
+    absorption: [f32; 4],
 }
 
 pub struct Renderer {
@@ -29,7 +38,12 @@ pub struct Renderer {
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    depth: wgpu::TextureView,
+    shadow: ShadowMap,
+    shadow_binding: wgpu::BindGroup,
+    targets: SceneTargets,
+    water_layout: wgpu::BindGroupLayout,
+    post_layout: wgpu::BindGroupLayout,
+    post: wgpu::RenderPipeline,
     width: u32,
     height: u32,
 }
@@ -40,25 +54,6 @@ pub(super) fn validate_extent(gpu: &Gpu, width: u32, height: u32) -> EngineResul
         return Err(format!("render dimensions must be in 1..={max}").into());
     }
     Ok(())
-}
-
-fn depth_view(gpu: &Gpu, width: u32, height: u32) -> wgpu::TextureView {
-    gpu.device
-        .create_texture(&wgpu::TextureDescriptor {
-            label: Some("scene-depth"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        })
-        .create_view(&Default::default())
 }
 
 fn uniform_layout(gpu: &Gpu, size: u64) -> wgpu::BindGroupLayout {
@@ -107,7 +102,7 @@ fn pipeline(
     source: &str,
     layouts: &[&wgpu::BindGroupLayout],
     buffers: &[wgpu::VertexBufferLayout<'_>],
-    depth: bool,
+    depth: Option<bool>,
 ) -> wgpu::RenderPipeline {
     let shader = gpu
         .device
@@ -143,13 +138,17 @@ fn pipeline(
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                cull_mode: if depth { Some(wgpu::Face::Back) } else { None },
+                cull_mode: if depth == Some(true) {
+                    Some(wgpu::Face::Back)
+                } else {
+                    None
+                },
                 ..Default::default()
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
+            depth_stencil: depth.map(|write| wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
-                depth_write_enabled: depth,
-                depth_compare: if depth {
+                depth_write_enabled: write,
+                depth_compare: if write {
                     wgpu::CompareFunction::Less
                 } else {
                     wgpu::CompareFunction::Always
@@ -179,20 +178,109 @@ impl Renderer {
             return Err("renderer requires an RGBA8/BGRA8 sRGB target".into());
         }
         let size = std::mem::size_of::<FrameUniforms>() as u64;
-        let layout = uniform_layout(gpu, size);
-        let (uniforms, bind_group) = uniform_binding(gpu, &layout, size);
+        let shadow_layout = uniform_layout(gpu, size);
+        let (uniforms, shadow_binding) = uniform_binding(gpu, &shadow_layout, size);
+        let shadow = ShadowMap::new(gpu);
+        let layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("scene-frame-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(size),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
+        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene-frame-bindings"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow.sampler),
+                },
+            ],
+        });
+        let water_layout = targets::water_layout(gpu);
+        let post_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("post-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
         let source = format!(
             "{}\n{}",
             include_str!("../shaders/common.wgsl"),
             include_str!("../shaders/sky.wgsl")
         );
         Ok(Self {
-            sky: pipeline(gpu, format, "sky", &source, &[&layout], &[], false),
-            water: WaterPass::new(gpu, format, &layout),
-            meshes: MeshPass::new(gpu, format, &layout),
+            sky: pipeline(
+                gpu,
+                HDR_FORMAT,
+                "sky",
+                &source,
+                &[&layout],
+                &[],
+                Some(false),
+            ),
+            water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout),
+            meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
+            post: pipeline(
+                gpu,
+                format,
+                "tone-map",
+                include_str!("../shaders/post.wgsl"),
+                &[&post_layout],
+                &[],
+                None,
+            ),
+            targets: SceneTargets::new(gpu, width, height, &water_layout, &post_layout),
             uniforms,
             bind_group,
-            depth: depth_view(gpu, width, height),
+            shadow,
+            shadow_binding,
+            water_layout,
+            post_layout,
             width,
             height,
         })
@@ -206,21 +294,27 @@ impl Renderer {
         validate_extent(gpu, width, height)?;
         self.width = width;
         self.height = height;
-        self.depth = depth_view(gpu, width, height);
+        self.targets = SceneTargets::new(gpu, width, height, &self.water_layout, &self.post_layout);
         Ok(())
     }
 
-    /// Upload newly encountered immutable meshes, then draw sky, opaque meshes, and optional water.
-    /// All geometry shares one depth attachment, so water cannot paint over visible land.
+    /// Render shadow depth, opaque HDR color/depth, refractive water, then tone-map once.
+    /// Sampled opaque depth is distinct from the water attachment to avoid read/write feedback.
     pub fn render(&mut self, gpu: &Gpu, target: &wgpu::TextureView, scene: &Scene) {
         self.meshes.prepare(gpu, &scene.meshes);
         let camera = &scene.camera;
         let water = scene.water.unwrap_or_default();
+        let sun = scene.sun.direction();
         let matrix = camera.view_projection(self.width as f32 / self.height as f32);
         let spacing = GRID_EXTENT / GRID_CELLS as f32;
         let uniforms = FrameUniforms {
             view_projection: matrix.to_cols_array_2d(),
             inverse_view_projection: matrix.inverse().to_cols_array_2d(),
+            light_view_projection: shadow::matrix(
+                Vec3::new(camera.position.x, water.level, camera.position.z),
+                sun,
+            )
+            .to_cols_array_2d(),
             camera_time: [
                 camera.position.x,
                 camera.position.y,
@@ -233,6 +327,19 @@ impl Renderer {
                 (camera.position.z / spacing).floor() * spacing,
                 water.level,
             ],
+            sun: [sun.x, sun.y, sun.z, f32::from(scene.sun.shadows)],
+            effects: [
+                f32::from(water.refraction),
+                water.refraction_strength.clamp(0.0, 1.0),
+                water.foam_strength.clamp(0.0, 1.0),
+                water.foam_width.clamp(0.05, 10.0),
+            ],
+            absorption: [
+                water.absorption[0].clamp(0.0, 10.0),
+                water.absorption[1].clamp(0.0, 10.0),
+                water.absorption[2].clamp(0.0, 10.0),
+                0.0,
+            ],
         };
         gpu.queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
@@ -243,9 +350,30 @@ impl Renderer {
             });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene-forward"),
+                label: Some("sun-shadow-pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            // This binding contains only the uniform buffer, not the shadow texture being written.
+            pass.set_bind_group(0, &self.shadow_binding, &[]);
+            if scene.sun.shadows {
+                self.meshes.encode_shadow(&mut pass, &scene.meshes);
+            }
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("opaque-hdr-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: &self.targets.opaque_color_view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -254,10 +382,10 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth,
+                    view: &self.targets.opaque_depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
+                        store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
                 }),
@@ -268,9 +396,68 @@ impl Renderer {
             pass.set_pipeline(&self.sky);
             pass.draw(0..3, 0..1);
             self.meshes.encode(&mut pass, &scene.meshes);
-            if scene.water.is_some() {
-                self.water.encode(&mut pass);
-            }
+        }
+        let extent = wgpu::Extent3d {
+            width: self.width,
+            height: self.height,
+            depth_or_array_layers: 1,
+        };
+        encoder.copy_texture_to_texture(
+            self.targets.opaque_color.as_image_copy(),
+            self.targets.composite_color.as_image_copy(),
+            extent,
+        );
+        if scene.water.is_some() {
+            encoder.copy_texture_to_texture(
+                self.targets.opaque_depth.as_image_copy(),
+                self.targets.water_depth.as_image_copy(),
+                extent,
+            );
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("water-composite-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.targets.composite_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.targets.water_depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_bind_group(1, &self.targets.water_inputs, &[]);
+            self.water.encode(&mut pass);
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tone-map-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.post);
+            pass.set_bind_group(0, &self.targets.post_inputs, &[]);
+            pass.draw(0..3, 0..1);
         }
         gpu.queue.submit([encoder.finish()]);
     }

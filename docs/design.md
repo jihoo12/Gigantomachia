@@ -1,6 +1,6 @@
 # Engine Design
 
-Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional animated water surface. There is no editor, ECS, asset-file loader, physics system, or render graph yet.
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. There is no editor, ECS, asset-file loader, physics system, or render graph yet.
 
 ## Application, Scene, and Renderer
 
@@ -12,17 +12,17 @@ examples/water.rs or examples/island.rs
                   window lifecycle + Input + update
                          |
                   Renderer::render(gpu, target, scene)
-                  sky → opaque meshes → optional water
+                  shadow map → opaque HDR color/depth
                          |
-                  shared depth + queue submission
+                  refractive water → tone mapping → submission
 ```
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
 | `Application` implementation | Scene construction, controls, animation, reset behavior, window title | GPU buffers, pipelines, surfaces |
 | `app` / `input` | Event loop, window/surface lifecycle, elapsed time, input state | Wave playback policy, island generation, camera key bindings |
-| `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, water parameters | Window or GPU handles |
-| `render` | Device setup, frame uniforms, depth, pipelines, mesh cache, submission, offscreen readback | Keyboard handling, demo state, procedural terrain algorithms |
+| `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, sunlight, water parameters | Window or GPU handles |
+| `render` | Device setup, frame uniforms, shadow/HDR/depth targets, pipelines, mesh cache, submission, readback | Keyboard handling, demo state, procedural terrain algorithms |
 | `terrain` | Seeded island heightfield and CPU mesh generation | Special terrain rendering code |
 | `examples/support` | Shared demo navigation, CLI, PNG encoding | Engine render passes |
 
@@ -70,7 +70,7 @@ For tools or tests, create `Gpu::headless()`, `OffscreenTarget`, and `Renderer`;
 - CPU meshes are immutable and have stable IDs. Cloning a `Scene` clones mesh `Arc`s, not vertex arrays.
 - The renderer uploads each distinct mesh once while it remains referenced by the current scene. Multiple instances reuse the same GPU geometry and have separate transform uniforms.
 - Mesh assets absent from the next rendered scene are evicted; instance uniform slots are resized to the current instance count. Removing and later re-adding a mesh uploads it again.
-- Frame resources and a single depth attachment belong to `Renderer`. Passes encode draw calls; only the renderer creates/submits the frame command buffer.
+- Frame resources belong to `Renderer`: a 2048² shadow depth map, opaque HDR color/depth, and separate composite HDR color/water depth. The water depth attachment receives a copy of opaque depth, while the original stays read-only for refraction/foam. Size-dependent targets and all their sampling bindings are recreated together on resize. Passes encode draw calls; only the renderer submits the frame command buffer.
 - Suspend drops window/GPU resources but preserves application-owned CPU scene data. Resume recreates resources and uploads geometry as needed.
 
 This is a small forward renderer: no GPU instancing, visibility culling, batching, asynchronous asset streaming, or multi-scene cache is implemented yet.
@@ -82,15 +82,15 @@ This is a small forward renderer: no GPU instancing, visibility culling, batchin
 - Updates receive elapsed time capped at 100 ms. The host has no game simulation or wave clock. The examples accumulate `Water::time` using their own speed/pause state.
 - Held keys persist; press transitions and accumulated mouse motion are consumed once per update. Quick press/release taps survive until that update. Focus loss clears input.
 - Camera movement is reusable and unconstrained. Sea-level/terrain clearance is a demo policy in `examples/support`.
-- Zero-sized or occluded windows stop rendering. Resize reconfigures the surface and depth storage. Lost/outdated surfaces are reconfigured, timeouts are retried, and other surface errors exit with a message.
+- Zero-sized or occluded windows stop rendering. Resize reconfigures the surface and all screen-sized HDR/depth storage. Lost/outdated surfaces are reconfigured, timeouts are retried, and other surface errors exit with a message.
 - Headless rendering accepts explicit scene time. A 60 Hz fixed game update is still future work, not part of this refactor.
 
 ## 3D Conventions
 
-Right-handed coordinates, Y-up, local camera forward -Z, meters, and column-vector matrices. Projection depth is 0..1, the depth comparison is `Less`, and depth clears to 1.0. Mesh triangles use CCW winding. Vertex colors and lighting are linear RGB; output targets are sRGB. One camera and opaque geometry are supported per frame.
+Right-handed coordinates, Y-up, local camera forward -Z, meters, and column-vector matrices. Projection depth is 0..1, the depth comparison is `Less`, and depth clears to 1.0. Mesh triangles use CCW winding. Vertex colors and lighting are linear RGB; output targets are sRGB. One camera, one directional sun, opaque meshes, and one water surface are supported per frame. Scene passes produce linear `Rgba16Float` HDR color; a final pass applies exposure compression exactly once before sRGB encoding.
 
 ## Validation and Next Steps
 
-CPU tests cover camera projection/movement, input transitions, mesh validation, grid winding, and deterministic terrain. Opt-in Vulkan integration tests use only the public engine API to check wave animation, zero-amplitude stability, resize/readback alignment, island visibility, shared geometry, transform updates, cache eviction, optional water, and depth occlusion above/below the surface.
+CPU tests cover camera projection/movement, input transitions, mesh validation, grid winding, deterministic terrain, and directional shadow projection. Opt-in Vulkan integration tests use only the public engine API to check wave animation, zero-amplitude stability, resize/readback alignment, island visibility, shared geometry, transform updates, cache eviction, optional water, depth occlusion with effects disabled, cast shadows on land/water, refraction/absorption, shallow-only foam, and resize equivalence to fresh render targets.
 
-The next water milestone is scene-color/depth sampling for refraction and absorption, followed by shoreline foam. The island currently adds visible land and depth occlusion; it does not implement those water effects. Reusable material/asset handles, ECS, and static glTF loading remain later work.
+Screen-space refraction, depth absorption, and shoreline foam are implemented; see [water rendering](water.md) for equations and limitations. Underwater views, scene-object reflections, shadow cascades, and ocean LOD remain future rendering work. Reusable material/asset handles, ECS, and static glTF loading are also still pending.

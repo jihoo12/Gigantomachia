@@ -21,6 +21,7 @@ struct GpuMesh {
 
 pub(super) struct MeshPass {
     pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     geometry: HashMap<u64, GpuMesh>,
     objects: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
@@ -31,6 +32,7 @@ impl MeshPass {
         gpu: &Gpu,
         format: wgpu::TextureFormat,
         frame_layout: &wgpu::BindGroupLayout,
+        shadow_frame_layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let layout = uniform_layout(gpu, std::mem::size_of::<ObjectUniforms>() as u64);
         let source = format!(
@@ -44,7 +46,60 @@ impl MeshPass {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &attributes,
         };
+        let shadow_shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("shadow-shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    format!(
+                        "{}\n{}",
+                        include_str!("../shaders/common.wgsl"),
+                        include_str!("../shaders/shadow.wgsl")
+                    )
+                    .into(),
+                ),
+            });
+        let shadow_layout = gpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shadow-pipeline-layout"),
+                bind_group_layouts: &[shadow_frame_layout, &layout],
+                push_constant_ranges: &[],
+            });
+        let shadow_pipeline = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("sun-shadow-pipeline"),
+                layout: Some(&shadow_layout),
+                vertex: wgpu::VertexState {
+                    module: &shadow_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: std::slice::from_ref(&vertex_layout),
+                    compilation_options: Default::default(),
+                },
+                fragment: None,
+                // Single-sided heightfields must cast shadows; use back-face culling, not front-face culling.
+                primitive: wgpu::PrimitiveState {
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: super::DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: Default::default(),
+                    bias: wgpu::DepthBiasState {
+                        constant: 2,
+                        slope_scale: 2.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            });
         Self {
+            shadow_pipeline,
             pipeline: pipeline(
                 gpu,
                 format,
@@ -52,7 +107,7 @@ impl MeshPass {
                 &source,
                 &[frame_layout, &layout],
                 &[vertex_layout],
-                true,
+                Some(true),
             ),
             layout,
             geometry: HashMap::new(),
@@ -107,10 +162,23 @@ impl MeshPass {
     }
 
     pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>, instances: &[MeshInstance]) {
+        self.encode_with(pass, instances, &self.pipeline);
+    }
+
+    pub fn encode_shadow(&self, pass: &mut wgpu::RenderPass<'_>, instances: &[MeshInstance]) {
+        self.encode_with(pass, instances, &self.shadow_pipeline);
+    }
+
+    fn encode_with(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        instances: &[MeshInstance],
+        pipeline: &wgpu::RenderPipeline,
+    ) {
         if instances.is_empty() {
             return;
         }
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(pipeline);
         for (i, instance) in instances.iter().enumerate() {
             let mesh = &self.geometry[&instance.mesh.id()];
             pass.set_bind_group(1, &self.objects[i].1, &[]);

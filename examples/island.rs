@@ -16,6 +16,7 @@ fn main() -> EngineResult<()> {
     let island = Island::default();
     let scene = Scene {
         camera: Camera::looking_at(Vec3::new(34.0, 24.0, 42.0), Vec3::new(0.0, 4.0, -12.0))?,
+        sun: Default::default(),
         meshes: vec![MeshInstance::new(Arc::new(island.mesh()?))],
         water: Some(Water {
             amplitude: 0.55,

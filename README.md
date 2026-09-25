@@ -2,7 +2,7 @@
 
 A draft of a small 3D engine for building games entirely in code, without a GUI editor.
 
-The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, and sunlight highlights. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required; ECS and file-based asset loading remain future work.
+The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required; ECS and file-based asset loading remain future work.
 
 ## Technology Choices
 
@@ -37,16 +37,21 @@ For a quicker development build, omit `--release`. Release builds improve CPU-si
 | Space | Pause/resume waves; the camera remains active |
 | `-` / `+` (or `=`) | Decrease/increase wave amplitude, 0–2 |
 | `[` / `]` | Decrease/increase wave speed, 0–3 |
-| R | Reset camera, waves, and time |
+| 1 | Toggle directional shadows |
+| 2 | Toggle refraction and depth absorption |
+| 3 | Toggle shoreline foam |
+| R | Reset camera, waves, effects, and time to startup settings |
 | Esc | Exit |
 
-Both examples share these controls. The window title displays amplitude, speed, and pause state. Example camera controls keep 3.5 meters of clearance above sea level or the island heightfield, with an 80-meter altitude limit. This is a navigation convenience, not a physics system; the engine camera itself has no water/terrain constraints.
+Both examples share these controls. The window title displays amplitude, speed, pause state, and effect toggles. Example camera controls keep 3.5 meters of clearance above sea level or the island heightfield, with an 80-meter altitude limit. This is a navigation convenience, not a physics system; the engine camera itself has no water/terrain constraints.
 
 Headless rendering uses the same pipelines and does not need a display server:
 
 ```sh
 cargo run --example gpu_info
 cargo run --example island -- --headless /tmp/island.png
+# Disable effects independently for comparison (also works in windowed mode).
+cargo run --example island -- --headless /tmp/island-base.png --no-shadows --no-refraction --no-foam
 cargo run --example water -- --headless /tmp/water.png
 # An optional time in seconds makes captures reproducible on the same GPU/driver.
 cargo run --example water -- --headless /tmp/water-t0.png 0
@@ -81,13 +86,13 @@ The project uses the wgpu 27.0.1 series as its initial API baseline and does not
 ```text
 src/app.rs             Generic Application host and window lifecycle
 src/input.rs           Held/pressed keys and accumulated mouse movement
-src/scene.rs           Camera, optional water, mesh instances
+src/scene.rs           Camera, sunlight, optional water, mesh instances
 src/mesh.rs            Validated immutable CPU geometry
 src/camera.rs          Perspective fly camera
 src/water.rs           Water parameters, independent of demo playback
 src/terrain.rs         Seeded island heightfield generator
-src/render/            GPU, frame renderer, mesh/water passes, readback
-src/shaders/           Shared lighting, sky, water, and mesh WGSL
+src/render/            GPU, shadow/HDR/water passes, frame targets, readback
+src/shaders/           Lighting, shadows, refraction, foam, and tone mapping
 examples/water.rs      Ocean scene setup
 examples/island.rs     Island scene setup
 examples/support/     Demo controls, CLI, and PNG writing

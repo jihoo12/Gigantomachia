@@ -72,7 +72,9 @@ impl Island {
         let shoreline =
             1.0 + 0.09 * (3.0 * theta + phase).sin() + 0.06 * (5.0 * theta - phase).cos();
         let radius = (p * Vec2::new(1.0, 1.12)).length() / shoreline;
-        let beach = -4.0 + 6.0 * (1.0 - smooth(0.77, 1.10, radius));
+        // Deepen the offshore shelf before the finite mesh edge, so transmission fades naturally.
+        let beach =
+            -4.0 + 6.0 * (1.0 - smooth(0.77, 1.10, radius)) - 65.0 * smooth(1.02, 1.55, radius);
         let interior = (1.0 - smooth(0.02, 0.82, radius)).powf(1.3);
         let broad = noise(p * 4.0, self.seed);
         let detail = noise(p * 13.0, self.seed.wrapping_add(1));
@@ -82,7 +84,7 @@ impl Island {
 
     pub fn mesh(&self) -> EngineResult<Mesh> {
         self.validate()?;
-        let extent = self.radius * 2.8;
+        let extent = self.radius * 3.6;
         let step = extent / self.cells as f32;
         let epsilon = step * 0.5;
         let mut vertices = Vec::with_capacity(((self.cells + 1).pow(2)) as usize);

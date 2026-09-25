@@ -28,7 +28,12 @@ pub(super) struct WaterPass {
 }
 
 impl WaterPass {
-    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat, layout: &wgpu::BindGroupLayout) -> Self {
+    pub fn new(
+        gpu: &Gpu,
+        format: wgpu::TextureFormat,
+        layout: &wgpu::BindGroupLayout,
+        inputs: &wgpu::BindGroupLayout,
+    ) -> Self {
         let attributes = wgpu::vertex_attr_array![0 => Float32x2];
         let vertex_layout = wgpu::VertexBufferLayout {
             array_stride: 8,
@@ -45,9 +50,9 @@ impl WaterPass {
             format,
             "water",
             &source,
-            &[layout],
+            &[layout, inputs],
             &[vertex_layout],
-            true,
+            Some(true),
         );
         let (vertices, indices) = grid(GRID_CELLS, GRID_EXTENT);
         let vertex_buffer = gpu

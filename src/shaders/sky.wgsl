@@ -14,5 +14,5 @@ struct SkyVertex {
 @fragment fn fs_main(in: SkyVertex) -> @location(0) vec4<f32> {
     let world = scene.inverse_view_projection * vec4<f32>(in.ndc, 1.0, 1.0);
     let ray = normalize(world.xyz / world.w - scene.camera_time.xyz);
-    return vec4<f32>(tone_map(sky(ray)), 1.0);
+    return vec4<f32>(sky(ray), 1.0);
 }
