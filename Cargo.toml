@@ -1,0 +1,17 @@
+[package]
+name = "gigantomachia"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+description = "An experimental code-first 3D game engine"
+
+[dependencies]
+bytemuck = { version = "1.25", features = ["derive"] }
+glam = "0.30"
+pollster = "0.4"
+wgpu = { version = "27.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "wgsl"] }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }
+
+[dev-dependencies]
+png = "0.18"
