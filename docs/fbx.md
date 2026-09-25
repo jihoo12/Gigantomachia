@@ -31,9 +31,9 @@ The transform and corner-index handling follow the ufbx [node](https://ufbx.gith
 
 ## Current Limits
 
-This is static geometry support, not full FBX scene playback. Skinning, blend shapes, geometry caches, polygon holes, singular transforms, and invalid vertex attributes return errors. Bake deformation and triangulate polygon holes before export.
+These loading functions return static geometry. For rigid node playback, use `AnimatedFbx`; see the [animation guide](animation.md). Skinning, blend shapes, geometry caches, polygon holes, singular transforms, and invalid vertex attributes return errors. Bake deformation and triangulate polygon holes before export.
 
-Textures (including embedded images) are not loaded, and UVs are not retained. All imported geometry is opaque: transparency, normal maps, metallic/roughness, and other material properties are not implemented. Animation tracks are not evaluated; authored static transforms are used. FBX cameras, lights, and non-polygon geometry are ignored. Warnings report detected textures, UVs, animation, cameras/lights, curves, and vertex alpha; they are not an exhaustive material-feature report. Referenced external files are never opened.
+Textures (including embedded images) are not loaded, and UVs are not retained. All imported geometry is opaque: transparency, normal maps, metallic/roughness, and other material properties are not implemented. The static loading functions do not evaluate animation tracks; authored static transforms are used. FBX cameras, lights, and non-polygon geometry are ignored. Warnings report detected textures, UVs, animation, cameras/lights, curves, and vertex alpha; they are not an exhaustive material-feature report. Referenced external files are never opened.
 
 ## Viewer
 
@@ -41,12 +41,14 @@ Textures (including embedded images) are not loaded, and UVs are not retained. A
 nix develop path:.
 # Bundled fixture: two colored meshes, one with mirrored/nonuniform scale.
 cargo run --example fbx
+# Play the bundled animated cube.
+cargo run --example fbx -- --animate
 cargo run --release --example fbx -- path/to/model.fbx
 cargo run --example fbx -- path/to/model.fbx --headless /tmp/model.png
 cargo run --example fbx -- path/to/model.fbx --frames 10
 ```
 
-The viewer scales the longest model dimension to eight meters, centers it above a gray floor, and positions the camera. This placement belongs to the example; the loader preserves authored dimensions. Extremely large models may exceed the renderer's supported transform scale. WASD/QE, right mouse drag, Shift, R, Esc, and the shadow toggle (1) use the shared demo controls. Navigation has no terrain clearance in this viewer.
+The static viewer scales the longest model dimension to eight meters, centers it above a gray floor, and positions the camera. This placement belongs to the example; the loader preserves authored dimensions. Extremely large models may exceed the renderer's supported transform scale. WASD/QE, right mouse drag, Shift, R, Esc, and the shadow toggle (1) use the shared demo controls. Navigation has no terrain clearance in this viewer.
 
 ## Verification
 

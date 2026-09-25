@@ -34,7 +34,12 @@ pub fn load_fbx(path: impl AsRef<Path>) -> EngineResult<FbxModel> {
 
 /// Parse an FBX from memory, independent of the GPU or filesystem.
 pub fn load_fbx_bytes(bytes: &[u8]) -> EngineResult<FbxModel> {
-    let source = ufbx::load_memory(
+    let source = parse(bytes)?;
+    import_scene(&source)
+}
+
+pub(super) fn parse(bytes: &[u8]) -> EngineResult<ufbx::SceneRoot> {
+    ufbx::load_memory(
         bytes,
         ufbx::LoadOpts {
             file_format: ufbx::FileFormat::Fbx,
@@ -49,7 +54,10 @@ pub fn load_fbx_bytes(bytes: &[u8]) -> EngineResult<FbxModel> {
             ..Default::default()
         },
     )
-    .map_err(|error| format!("could not parse FBX: {error:?}"))?;
+    .map_err(|error| format!("could not parse FBX: {error:?}").into())
+}
+
+pub(super) fn import_scene(source: &ufbx::Scene) -> EngineResult<FbxModel> {
     let mut warnings = BTreeSet::new();
     if !source.textures.is_empty() {
         warnings.insert(
@@ -121,7 +129,7 @@ pub fn load_fbx_bytes(bytes: &[u8]) -> EngineResult<FbxModel> {
     Ok(model)
 }
 
-fn visible(mut node: &ufbx::Node) -> bool {
+pub(super) fn visible(mut node: &ufbx::Node) -> bool {
     loop {
         if !node.visible {
             return false;

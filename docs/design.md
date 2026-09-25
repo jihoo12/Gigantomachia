@@ -1,6 +1,6 @@
 # Engine Design
 
-Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Static ASCII/binary FBX import produces the same opaque meshes. There is no editor, ECS, physics system, or render graph yet.
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. There is no editor, ECS, physics system, or render graph yet.
 
 ## Application, Scene, and Renderer
 
@@ -23,7 +23,7 @@ examples/water.rs, examples/island.rs, or examples/fbx.rs
 | `app` / `input` | Event loop, window/surface lifecycle, elapsed time, input state | Wave playback policy, island generation, camera key bindings |
 | `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, sunlight, water parameters | Window or GPU handles |
 | `render` | Device setup, frame uniforms, shadow/HDR/depth targets, pipelines, mesh cache, submission, readback | Keyboard handling, demo state, procedural terrain algorithms |
-| `asset` | Static FBX parsing, coordinate conversion, CPU meshes, import diagnostics | GPU uploads, texture decoding, animation playback |
+| `asset` | FBX parsing, coordinate conversion, CPU meshes, rigid animation sampling, import diagnostics | GPU uploads, texture decoding, playback clocks, skeletal deformation |
 | `terrain` | Seeded island heightfield and CPU mesh generation | Special terrain rendering code |
 | `examples/support` | Shared demo navigation, CLI, PNG encoding | Engine render passes |
 
@@ -65,6 +65,8 @@ For a mesh, construct `Mesh::new(vertices, indices)`, share it with `Arc<Mesh>`,
 `MeshInstance::set_transform` accepts finite, invertible affine transforms with a positive determinant. Normal matrices use inverse transpose, including nonuniform scale. FBX import bakes reflected source transforms and corrects winding before creating instances. Reflected runtime transforms are rejected because the current opaque pipeline uses one CCW/back-face-culling configuration.
 
 For tools or tests, create `Gpu::headless()`, `OffscreenTarget`, and `Renderer`; render a `Scene` into the target view and call `read_rgba8()`. The target format and dimensions must match the renderer. Readback blocks until GPU work completes and is intended for captures/tests, not each interactive frame. PNG is a development dependency used only by examples.
+
+Rigid FBX clips are sampled through `AnimatedFbx` using an application-owned clock. Samples share rest geometry and update instance transforms; see the [animation guide](animation.md).
 
 ## Resource Ownership and Lifetime
 

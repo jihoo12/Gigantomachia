@@ -445,3 +445,58 @@ fn imported_fbx_uses_standard_mesh_rendering() -> EngineResult<()> {
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn animated_fbx_changes_geometry_and_shadows_without_reuploading_meshes() -> EngineResult<()> {
+    let asset = gigantomachia::asset::AnimatedFbx::from_bytes(include_bytes!(
+        "fixtures/animated_cube_ascii.fbx"
+    ))?;
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    let ground = MeshInstance::new(plane(12.0, 0.0, [0.5; 3])?);
+    let mut scene = Scene {
+        camera: Camera::looking_at(Vec3::new(10.0, 9.0, 14.0), Vec3::new(0.0, 1.5, 0.0))?,
+        ..Default::default()
+    };
+    scene.sun.direction = Vec3::new(-1.0, 2.0, -1.0);
+    let mut captures = Vec::new();
+    let mut shadow_masks = Vec::new();
+    for time in [0.0, 1.0, 2.0] {
+        scene.meshes = asset.sample(0, time, true, Mat4::IDENTITY)?;
+        scene.meshes.push(ground.clone());
+        scene.sun.shadows = true;
+        let shaded = frame(&gpu, &mut renderer, &target, &scene)?;
+        scene.sun.shadows = false;
+        let lit = frame(&gpu, &mut renderer, &target, &scene)?;
+        let mask = lit
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(shaded.as_chunks::<4>().0)
+            .map(|(a, b)| u16::from(a[0]) > u16::from(b[0]) + 8)
+            .collect::<Vec<_>>();
+        assert!(
+            mask.iter().filter(|&&dark| dark).count() > 10,
+            "animated mesh must cast shadows"
+        );
+        shadow_masks.push(mask);
+        captures.push(shaded);
+        assert_eq!(renderer.resident_meshes(), 2);
+    }
+    assert_ne!(captures[0], captures[1]);
+    assert_eq!(
+        captures[0], captures[2],
+        "loop boundary returns to the first frame"
+    );
+    assert_ne!(
+        shadow_masks[0], shadow_masks[1],
+        "shadows must follow animation"
+    );
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}

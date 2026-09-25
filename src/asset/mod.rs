@@ -3,3 +3,6 @@
 mod fbx;
 
 pub use fbx::{FbxModel, load_fbx, load_fbx_bytes};
+
+mod animation;
+pub use animation::{AnimatedFbx, AnimationClip};

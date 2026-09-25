@@ -1,0 +1,244 @@
+; FBX 7.4.0 project file
+; Original synthetic fixture, Apache-2.0.
+FBXHeaderExtension:  {
+    FBXHeaderVersion: 1003
+    FBXVersion: 7400
+    Creator: "Gigantomachia fixture generator"
+}
+GlobalSettings:  {
+    Version: 1000
+    Properties70:  {
+        P: "UpAxis", "int", "", "A", 1
+        P: "UpAxisSign", "int", "", "A", 1
+        P: "FrontAxis", "int", "", "A", 2
+        P: "FrontAxisSign", "int", "", "A", 1
+        P: "CoordAxis", "int", "", "A", 0
+        P: "CoordAxisSign", "int", "", "A", 1
+        P: "UnitScaleFactor", "double", "", "A", 1.0
+        P: "OriginalUnitScaleFactor", "double", "", "A", 1.0
+    }
+}
+Objects:  {
+    Geometry: 1000, "Geometry::TestMesh", "Mesh" {
+        GeometryVersion: 124
+        Vertices: *24 {
+            a: -100.0,0.0,-100.0,100.0,0.0,-100.0,100.0,200.0,-100.0,-100.0,200.0,-100.0,-100.0,0.0,100.0,100.0,0.0,100.0,100.0,200.0,100.0,-100.0,200.0,100.0
+        }
+        PolygonVertexIndex: *24 {
+            a: 0,3,2,-2,4,5,6,-8,0,4,7,-4,1,2,6,-6,0,1,5,-5,3,7,6,-3
+        }
+        LayerElementMaterial: 0 {
+            Version: 101
+            Name: ""
+            MappingInformationType: "ByPolygon"
+            ReferenceInformationType: "IndexToDirect"
+            Materials: *6 {
+                a: 0,1,0,1,0,1
+            }
+        }
+        LayerElementColor: 0 {
+            Version: 101
+            Name: "Tint"
+            MappingInformationType: "ByPolygonVertex"
+            ReferenceInformationType: "Direct"
+            Colors: *96 {
+                a: 0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0,0.5,1.0,1.0,1.0
+            }
+        }
+        LayerElementUV: 0 {
+            Version: 101
+            Name: "UVMap"
+            MappingInformationType: "ByPolygonVertex"
+            ReferenceInformationType: "Direct"
+            UV: *48 {
+                a: 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+            }
+        }
+        Layer: 0 {
+            Version: 100
+            LayerElement:  {
+                Type: "LayerElementMaterial"
+                TypedIndex: 0
+            }
+            LayerElement:  {
+                Type: "LayerElementColor"
+                TypedIndex: 0
+            }
+            LayerElement:  {
+                Type: "LayerElementUV"
+                TypedIndex: 0
+            }
+        }
+    }
+    Model: 100, "Model::Mover", "Null" {
+        Version: 232
+        Properties70:  {
+            P: "Lcl Translation", "Lcl Translation", "", "A", 0.0, 0.0, 0.0
+            P: "Lcl Scaling", "Lcl Scaling", "", "A", 1.0, 1.0, 1.0
+            P: "GeometricTranslation", "Vector3D", "", "A", 0.0, 0.0, 0.0
+            P: "Visibility", "Visibility", "", "A", 1.0
+        }
+        Shading: 1
+        Culling: "CullingOff"
+    }
+    Model: 101, "Model::AnimatedCube", "Mesh" {
+        Version: 232
+        Properties70:  {
+            P: "Lcl Translation", "Lcl Translation", "", "A", 0.0, 0.0, 0.0
+            P: "Lcl Scaling", "Lcl Scaling", "", "A", 1.0, 1.0, 1.0
+            P: "GeometricTranslation", "Vector3D", "", "A", 0.0, 50.0, 0.0
+            P: "Visibility", "Visibility", "", "A", 1.0
+        }
+        Shading: 1
+        Culling: "CullingOff"
+    }
+    Material: 200, "Material::Red", "" {
+        Version: 102
+        ShadingModel: "lambert"
+        MultiLayer: 0
+        Properties70:  {
+            P: "DiffuseColor", "Color", "", "A", 0.8, 0.15, 0.08
+            P: "DiffuseFactor", "Number", "", "A", 1.0
+        }
+    }
+    Material: 201, "Material::Blue", "" {
+        Version: 102
+        ShadingModel: "lambert"
+        MultiLayer: 0
+        Properties70:  {
+            P: "DiffuseColor", "Color", "", "A", 0.08, 0.25, 0.8
+            P: "DiffuseFactor", "Number", "", "A", 1.0
+        }
+    }
+    AnimationStack: 400, "AnimStack::Bounce", "" {
+        Properties70:  {
+            P: "LocalStart", "KTime", "", "A", 46186158000
+            P: "LocalStop", "KTime", "", "A", 138558474000
+        }
+    }
+    AnimationLayer: 401, "AnimLayer::BaseLayer", ""
+    AnimationCurveNode: 500, "AnimCurveNode::Track", "" {
+        Properties70:  {
+            P: "d|X", "Number", "", "A", 0.0
+            P: "d|Y", "Number", "", "A", 0.0
+            P: "d|Z", "Number", "", "A", 0.0
+        }
+    }
+    AnimationCurve: 501, "AnimCurve::Curve", "" {
+        Default: 0.0
+        KeyVer: 4008
+        KeyTime: *3 {
+            a: 46186158000,92372316000,138558474000
+        }
+        KeyValueFloat: *3 {
+            a: -200.0,200.0,-200.0
+        }
+        KeyAttrFlags: *1 {
+            a: 4
+        }
+        KeyAttrDataFloat: *4 {
+            a: 0.0,0.0,0.0,0.0
+        }
+        KeyAttrRefCount: *1 {
+            a: 3
+        }
+    }
+    AnimationCurveNode: 502, "AnimCurveNode::Track", "" {
+        Properties70:  {
+            P: "d|X", "Number", "", "A", 0.0
+            P: "d|Y", "Number", "", "A", 0.0
+            P: "d|Z", "Number", "", "A", 0.0
+        }
+    }
+    AnimationCurve: 503, "AnimCurve::Curve", "" {
+        Default: 0.0
+        KeyVer: 4008
+        KeyTime: *3 {
+            a: 46186158000,92372316000,138558474000
+        }
+        KeyValueFloat: *3 {
+            a: 0.0,200.0,0.0
+        }
+        KeyAttrFlags: *1 {
+            a: 4
+        }
+        KeyAttrDataFloat: *4 {
+            a: 0.0,0.0,0.0,0.0
+        }
+        KeyAttrRefCount: *1 {
+            a: 3
+        }
+    }
+    AnimationCurveNode: 504, "AnimCurveNode::Track", "" {
+        Properties70:  {
+            P: "d|X", "Number", "", "A", 0.0
+            P: "d|Y", "Number", "", "A", 0.0
+            P: "d|Z", "Number", "", "A", 0.0
+        }
+    }
+    AnimationCurve: 505, "AnimCurve::Curve", "" {
+        Default: 0.0
+        KeyVer: 4008
+        KeyTime: *3 {
+            a: 46186158000,92372316000,138558474000
+        }
+        KeyValueFloat: *3 {
+            a: 0.0,180.0,360.0
+        }
+        KeyAttrFlags: *1 {
+            a: 4
+        }
+        KeyAttrDataFloat: *4 {
+            a: 0.0,0.0,0.0,0.0
+        }
+        KeyAttrRefCount: *1 {
+            a: 3
+        }
+    }
+    AnimationCurveNode: 506, "AnimCurveNode::Track", "" {
+        Properties70:  {
+            P: "d|X", "Number", "", "A", 1.0
+            P: "d|Y", "Number", "", "A", 1.0
+            P: "d|Z", "Number", "", "A", 1.0
+        }
+    }
+    AnimationCurve: 507, "AnimCurve::Curve", "" {
+        Default: 1.0
+        KeyVer: 4008
+        KeyTime: *3 {
+            a: 46186158000,92372316000,138558474000
+        }
+        KeyValueFloat: *3 {
+            a: 1.0,1.5,1.0
+        }
+        KeyAttrFlags: *1 {
+            a: 4
+        }
+        KeyAttrDataFloat: *4 {
+            a: 0.0,0.0,0.0,0.0
+        }
+        KeyAttrRefCount: *1 {
+            a: 3
+        }
+    }
+}
+Connections:  {
+    C: "OO", 100, 0
+    C: "OO", 101, 100
+    C: "OO", 1000, 101
+    C: "OO", 200, 101
+    C: "OO", 201, 101
+    C: "OO", 401, 400
+    C: "OO", 500, 401
+    C: "OP", 500, 100, "Lcl Translation"
+    C: "OP", 501, 500, "d|X"
+    C: "OO", 502, 401
+    C: "OP", 502, 101, "Lcl Translation"
+    C: "OP", 503, 502, "d|Y"
+    C: "OO", 504, 401
+    C: "OP", 504, 101, "Lcl Rotation"
+    C: "OP", 505, 504, "d|Y"
+    C: "OO", 506, 401
+    C: "OP", 506, 101, "Lcl Scaling"
+    C: "OP", 507, 506, "d|Y"
+}

@@ -2,12 +2,13 @@
 
 use gigantomachia::{
     app::{self, AppAction, AppConfig, Application},
+    asset::AnimatedFbx,
     input::{Input, KeyCode as Key, MouseButton},
     render::{EngineResult, Gpu, OffscreenTarget, Renderer},
     scene::Scene,
     terrain::Island,
 };
-use glam::{Vec2, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use std::{fs::File, io::BufWriter, path::Path};
 
 pub struct Demo {
@@ -17,6 +18,8 @@ pub struct Demo {
     ground: Option<Island>,
     speed: f32,
     paused: bool,
+    animation: Option<(AnimatedFbx, Mat4)>,
+    elapsed: f64,
 }
 
 impl Demo {
@@ -28,7 +31,27 @@ impl Demo {
             ground,
             speed: 1.0,
             paused: false,
+            animation: None,
+            elapsed: 0.0,
         }
+    }
+    #[allow(dead_code)] // Only the FBX viewer attaches an animation.
+    pub fn with_animation(mut self, asset: AnimatedFbx, placement: Mat4) -> EngineResult<Self> {
+        self.animation = Some((asset, placement));
+        self.sample_animation(0.0)?;
+        self.initial = self.scene.clone();
+        Ok(self)
+    }
+
+    fn sample_animation(&mut self, seconds: f64) -> EngineResult<()> {
+        if let Some((asset, placement)) = &self.animation {
+            let instances = asset.sample(0, seconds, true, *placement)?;
+            for (destination, instance) in self.scene.meshes.iter_mut().zip(instances) {
+                *destination = instance;
+            }
+        }
+        self.elapsed = seconds;
+        Ok(())
     }
 }
 
@@ -43,6 +66,7 @@ impl Application for Demo {
         }
         if input.pressed(Key::KeyR) {
             self.scene = self.initial.clone();
+            self.elapsed = 0.0;
             self.speed = 1.0;
             self.paused = false;
             return AppAction::Continue;
@@ -101,10 +125,26 @@ impl Application for Demo {
                 water.time += dt * self.speed;
             }
         }
+        if !self.paused
+            && let Err(error) = self.sample_animation(self.elapsed + f64::from(dt * self.speed))
+        {
+            eprintln!("Animation playback failed: {error}");
+            return AppAction::Exit;
+        }
         AppAction::Continue
     }
 
     fn title(&self) -> String {
+        if let Some((asset, _)) = &self.animation {
+            return format!(
+                "Gigantomachia | {} | {} | {:.2}s | speed {:.1}{} | Space: pause | [/]: speed | R: reset",
+                self.name,
+                asset.clips()[0].name,
+                self.elapsed,
+                self.speed,
+                if self.paused { " | PAUSED" } else { "" }
+            );
+        }
         format!(
             "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {}",
             self.name,
@@ -192,6 +232,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
             if let Some(water) = &mut demo.scene.water {
                 water.time = 1.25;
             }
+            demo.sample_animation(1.25)?;
             snapshot(&demo.scene, Path::new(path))
         }
         [flag, path, time] if flag == "--headless" => {
@@ -202,6 +243,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
             if let Some(water) = &mut demo.scene.water {
                 water.time = time;
             }
+            demo.sample_animation(f64::from(time))?;
             snapshot(&demo.scene, Path::new(path))
         }
         _ => Err("invalid arguments; use --help for usage".into()),

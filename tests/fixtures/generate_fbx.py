@@ -164,6 +164,33 @@ def main():
     (root / "static_scene_binary.fbx").write_bytes(binary(nodes, 7400))
     nodes[0].children[1].props = [7500]
     (root / "static_scene_binary_7500.fbx").write_bytes(binary(nodes, 7500))
+    # Two-second rigid animation with a nonzero clip start and an animated parent.
+    ticks = 46186158000
+    animated_objects = [geometry(points, faces, True), model(100, "Mover", kind="Null"),
+        model(101, "AnimatedCube", geometric=(0.0, 50.0, 0.0)),
+        material(200, "Red", (0.8, 0.15, 0.08)), material(201, "Blue", (0.08, 0.25, 0.8)),
+        Node("AnimationStack", [Id(400), "AnimStack::Bounce", ""], [Node("Properties70", children=[
+            prop("LocalStart", "KTime", Id(ticks)), prop("LocalStop", "KTime", Id(3*ticks))])]),
+        Node("AnimationLayer", [Id(401), "AnimLayer::BaseLayer", ""])]
+    animated_links = [connection(100, 0), connection(101, 100), connection(1000, 101),
+        connection(200, 101), connection(201, 101), connection(401, 400)]
+    for channel, (target, property_, axis, values) in enumerate([
+        (100, "Lcl Translation", "X", [-200.0, 200.0, -200.0]),
+        (101, "Lcl Translation", "Y", [0.0, 200.0, 0.0]),
+        (101, "Lcl Rotation", "Y", [0.0, 180.0, 360.0]),
+        (101, "Lcl Scaling", "Y", [1.0, 1.5, 1.0]),
+    ]):
+        node_id, curve_id = 500 + channel*2, 501 + channel*2
+        default = 1.0 if property_ == "Lcl Scaling" else 0.0
+        animated_objects += [Node("AnimationCurveNode", [Id(node_id), "AnimCurveNode::Track", ""],
+            [Node("Properties70", children=[prop("d|"+a, "Number", default) for a in "XYZ"])]),
+            Node("AnimationCurve", [Id(curve_id), "AnimCurve::Curve", ""], [Node("Default", [default]),
+                Node("KeyVer", [4008]), Node("KeyTime", [Array("q", [ticks, 2*ticks, 3*ticks])]),
+                Node("KeyValueFloat", [Array("f", values)]), Node("KeyAttrFlags", [Array("i", [4])]),
+                Node("KeyAttrDataFloat", [Array("f", [0.0]*4)]), Node("KeyAttrRefCount", [Array("i", [3])])])]
+        animated_links += [connection(node_id, 401), connection(node_id, target, property_),
+            connection(curve_id, node_id, "d|"+axis)]
+    (root / "animated_cube_ascii.fbx").write_text(ascii_fbx(document(animated_objects, animated_links)))
     z_up = document([geometry([(0, 0, 0), (100, 0, 0), (0, 0, 100)], [[0, 1, 2]]), model(101, "ZUp")],
         [connection(1000, 101), connection(101, 0)], True)
     (root / "z_up_ascii.fbx").write_text(ascii_fbx(z_up))

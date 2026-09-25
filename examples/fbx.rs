@@ -1,9 +1,9 @@
-//! Static FBX viewer. File import stays CPU-only and rendering uses the normal engine passes.
+//! FBX viewer with optional rigid node animation. File import stays CPU-only and rendering uses the normal engine passes.
 
 mod support;
 
 use gigantomachia::{
-    asset::load_fbx,
+    asset::{AnimatedFbx, load_fbx},
     camera::Camera,
     mesh::{Mesh, Vertex},
     render::EngineResult,
@@ -14,9 +14,11 @@ use std::{path::PathBuf, sync::Arc};
 
 fn main() -> EngineResult<()> {
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+    let animated = args.iter().any(|arg| arg == "--animate");
+    args.retain(|arg| arg != "--animate");
     if args.iter().any(|arg| arg == "--help") {
         println!(
-            "FBX viewer\n  cargo run --example fbx -- [model.fbx] [--headless output.png | --frames COUNT]\n\nWithout a path, loads the bundled static-scene fixture.\nWASD/QE: move | RMB drag: look | Shift: faster | 1: shadows | R: reset | Esc: exit\nStatic meshes and base/vertex colors only; textures, skinning, and animation playback are unsupported."
+            "FBX viewer\n  cargo run --example fbx -- [model.fbx] [--animate] [--headless output.png [seconds] | --frames COUNT]\n\nWithout a path, loads the static fixture or the animated cube with --animate.\nWASD/QE: move | RMB drag: look | Shift: faster | 1: shadows | R: reset | Esc: exit\n--animate: play the first rigid node animation clip (Space: pause, [/]: speed).\nTextures and skinning are unsupported."
         );
         return Ok(());
     }
@@ -26,9 +28,21 @@ fn main() -> EngineResult<()> {
     {
         PathBuf::from(args.remove(0))
     } else {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/static_scene_ascii.fbx")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(if animated {
+            "tests/fixtures/animated_cube_ascii.fbx"
+        } else {
+            "tests/fixtures/static_scene_ascii.fbx"
+        })
     };
-    let mut model = load_fbx(&path)?;
+    let animation = if animated {
+        Some(AnimatedFbx::load(&path)?)
+    } else {
+        None
+    };
+    let mut model = match &animation {
+        Some(asset) => asset.model().clone(),
+        None => load_fbx(&path)?,
+    };
     for warning in &model.warnings {
         eprintln!("FBX: {warning}");
     }
@@ -39,9 +53,9 @@ fn main() -> EngineResult<()> {
         model.bounds_min,
         model.bounds_max
     );
-    // Viewer-only placement: preserve model proportions, fit the longest axis to eight meters.
+    // Viewer-only placement: preserve proportions and leave extra room for animation.
     let size = model.bounds_max - model.bounds_min;
-    let scale = 8.0 / size.max_element().max(0.001);
+    let scale = if animated { 2.0 } else { 8.0 } / size.max_element().max(0.001);
     let center = (model.bounds_min + model.bounds_max) * 0.5;
     let offset = Vec3::new(-center.x, -model.bounds_min.y, -center.z) * scale;
     let placement =
@@ -79,5 +93,9 @@ fn main() -> EngineResult<()> {
                 .map_err(|_| "viewer options must be UTF-8")
         })
         .collect::<Result<Vec<_>, _>>()?;
-    support::run_with_args(support::Demo::new("FBX", scene, None), options)
+    let mut demo = support::Demo::new("FBX", scene, None);
+    if let Some(asset) = animation {
+        demo = demo.with_animation(asset, placement)?;
+    }
+    support::run_with_args(demo, options)
 }

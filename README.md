@@ -2,7 +2,7 @@
 
 A draft of a small 3D engine for building games entirely in code, without a GUI editor.
 
-The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required. Static ASCII/binary FBX meshes can also be imported through the engine asset API; ECS remains future work.
+The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
 
 ## Technology Choices
 
@@ -27,6 +27,8 @@ cargo run --release --example island
 cargo run --release --example water
 # View the bundled FBX fixture, or provide your own model path.
 cargo run --release --example fbx -- path/to/model.fbx
+# Play the bundled moving, rotating cube.
+cargo run --example fbx -- --animate
 ```
 
 For a quicker development build, omit `--release`. Release builds improve CPU-side frame performance.
@@ -91,7 +93,7 @@ src/app.rs             Generic Application host and window lifecycle
 src/input.rs           Held/pressed keys and accumulated mouse movement
 src/scene.rs           Camera, sunlight, optional water, mesh instances
 src/mesh.rs            Validated immutable CPU geometry
-src/asset/             CPU-only static FBX import
+src/asset/             CPU-only FBX import and rigid node animation
 src/camera.rs          Perspective fly camera
 src/water.rs           Water parameters, independent of demo playback
 src/terrain.rs         Seeded island heightfield generator
@@ -99,7 +101,7 @@ src/render/            GPU, shadow/HDR/water passes, frame targets, readback
 src/shaders/           Lighting, shadows, refraction, foam, and tone mapping
 examples/water.rs      Ocean scene setup
 examples/island.rs     Island scene setup
-examples/fbx.rs        Static FBX viewer
+examples/fbx.rs        FBX viewer with optional animation
 examples/support/     Demo controls, CLI, and PNG writing
 examples/gpu_info.rs   Development environment verification
 tests/rendering.rs     Public engine API GPU integration tests
@@ -110,7 +112,7 @@ docs/water.md          Water model and limitations
 docs/island.md         Island generation and limitations
 ```
 
-See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), [island notes](docs/island.md), and [FBX import guide](docs/fbx.md). The renderer owns GPU resources and frame submission; examples only provide scene data and application behavior.
+See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), [island notes](docs/island.md), [FBX import guide](docs/fbx.md), and [animation guide](docs/animation.md). The renderer owns GPU resources and frame submission; examples only provide scene data and application behavior.
 
 Project documentation is written in English. Completed work is validated and committed to Git.
 
