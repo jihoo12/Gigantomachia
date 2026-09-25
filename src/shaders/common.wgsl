@@ -7,6 +7,7 @@ struct Uniforms {
     sun: vec4<f32>,
     effects: vec4<f32>,
     absorption: vec4<f32>,
+    surface: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(0) @binding(1) var shadow_depth: texture_depth_2d;

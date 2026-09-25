@@ -7,7 +7,7 @@ mod shadow;
 mod targets;
 mod water;
 
-use crate::scene::Scene;
+use crate::{scene::Scene, water::WaterStyle};
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 pub use gpu::{EngineResult, Gpu, instance};
@@ -30,6 +30,7 @@ struct FrameUniforms {
     sun: [f32; 4],
     effects: [f32; 4],
     absorption: [f32; 4],
+    surface: [f32; 4],
 }
 
 pub struct Renderer {
@@ -304,6 +305,8 @@ impl Renderer {
         self.meshes.prepare(gpu, &scene.meshes);
         let camera = &scene.camera;
         let water = scene.water.unwrap_or_default();
+        let detailed = water.style == WaterStyle::Realistic;
+        self.water.prepare(gpu, scene.water.is_some() && detailed);
         let sun = scene.sun.direction();
         let matrix = camera.view_projection(self.width as f32 / self.height as f32);
         let spacing = GRID_EXTENT / GRID_CELLS as f32;
@@ -333,6 +336,20 @@ impl Renderer {
                 water.refraction_strength.clamp(0.0, 1.0),
                 water.foam_strength.clamp(0.0, 1.0),
                 water.foam_width.clamp(0.05, 10.0),
+            ],
+            surface: [
+                f32::from(detailed),
+                if water.ripple_strength.is_finite() {
+                    water.ripple_strength.clamp(0.0, 2.0)
+                } else {
+                    1.0
+                },
+                if water.roughness.is_finite() {
+                    water.roughness.clamp(0.08, 0.6)
+                } else {
+                    0.22
+                },
+                0.0,
             ],
             absorption: [
                 water.absorption[0].clamp(0.0, 10.0),
@@ -437,7 +454,7 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
-            self.water.encode(&mut pass);
+            self.water.encode(&mut pass, detailed);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

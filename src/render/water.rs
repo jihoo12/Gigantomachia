@@ -4,6 +4,7 @@ use super::{Gpu, pipeline};
 use wgpu::util::DeviceExt;
 
 pub(super) const GRID_CELLS: u32 = 256;
+pub(super) const DETAILED_CELLS: u32 = 512;
 pub(super) const GRID_EXTENT: f32 = 256.0;
 
 fn grid(cells: u32, extent: f32) -> (Vec<[f32; 2]>, Vec<u32>) {
@@ -22,6 +23,11 @@ fn grid(cells: u32, extent: f32) -> (Vec<[f32; 2]>, Vec<u32>) {
 
 pub(super) struct WaterPass {
     pipeline: wgpu::RenderPipeline,
+    basic: WaterGrid,
+    detailed: Option<WaterGrid>,
+}
+
+struct WaterGrid {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
@@ -54,7 +60,35 @@ impl WaterPass {
             &[vertex_layout],
             Some(true),
         );
-        let (vertices, indices) = grid(GRID_CELLS, GRID_EXTENT);
+        Self {
+            pipeline,
+            basic: WaterGrid::new(gpu, GRID_CELLS),
+            detailed: None,
+        }
+    }
+
+    pub fn prepare(&mut self, gpu: &Gpu, detailed: bool) {
+        if detailed && self.detailed.is_none() {
+            self.detailed = Some(WaterGrid::new(gpu, DETAILED_CELLS));
+        }
+    }
+
+    pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>, detailed: bool) {
+        let grid = if detailed {
+            self.detailed.as_ref().expect("prepared detailed grid")
+        } else {
+            &self.basic
+        };
+        pass.set_pipeline(&self.pipeline);
+        pass.set_vertex_buffer(0, grid.vertices.slice(..));
+        pass.set_index_buffer(grid.indices.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..grid.index_count, 0, 0..1);
+    }
+}
+
+impl WaterGrid {
+    fn new(gpu: &Gpu, cells: u32) -> Self {
+        let (vertices, indices) = grid(cells, GRID_EXTENT);
         let vertex_buffer = gpu
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -70,18 +104,10 @@ impl WaterPass {
                 usage: wgpu::BufferUsages::INDEX,
             });
         Self {
-            pipeline,
             vertices: vertex_buffer,
             indices: index_buffer,
             index_count: indices.len() as u32,
         }
-    }
-
-    pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>) {
-        pass.set_pipeline(&self.pipeline);
-        pass.set_vertex_buffer(0, self.vertices.slice(..));
-        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..self.index_count, 0, 0..1);
     }
 }
 

@@ -500,3 +500,90 @@ fn animated_fbx_changes_geometry_and_shadows_without_reuploading_meshes() -> Eng
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn realistic_water_toggle_detail_roughness_flat_surface_and_resize() -> EngineResult<()> {
+    use gigantomachia::water::WaterStyle;
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    let mut scene = Scene {
+        water: Some(Water {
+            time: 1.25,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let original = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.water.as_mut().unwrap().style = WaterStyle::Realistic;
+    let detailed = frame(&gpu, &mut renderer, &target, &scene)?;
+    let changed = original
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(detailed.as_chunks::<4>().0)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        changed > 5000,
+        "the realistic style must visibly change the water"
+    );
+    assert!(detailed.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
+    scene.water.as_mut().unwrap().ripple_strength = 0.0;
+    assert_ne!(detailed, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().ripple_strength = 1.0;
+    scene.water.as_mut().unwrap().roughness = 0.55;
+    assert_ne!(detailed, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().roughness = 0.22;
+    scene.water.as_mut().unwrap().time = 2.0;
+    assert_ne!(detailed, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().time = 1.25;
+    scene.water.as_mut().unwrap().style = WaterStyle::Stylized;
+    assert_eq!(
+        original,
+        frame(&gpu, &mut renderer, &target, &scene)?,
+        "style toggling must be reversible"
+    );
+    scene.water.as_mut().unwrap().style = WaterStyle::Realistic;
+    scene.water.as_mut().unwrap().amplitude = 0.0;
+    let flat = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.water.as_mut().unwrap().time = 8.0;
+    assert_eq!(
+        flat,
+        frame(&gpu, &mut renderer, &target, &scene)?,
+        "zero amplitude must disable all surface waves"
+    );
+    scene.water.as_mut().unwrap().amplitude = 1.0;
+    // Exercise the existing effects with the detailed geometry and shading enabled.
+    scene.camera = Camera::looking_at(Vec3::new(0.0, 10.0, 14.0), Vec3::ZERO)?;
+    let mut beach = MeshInstance::new(plane(12.0, 0.2, [0.5, 0.35, 0.16])?);
+    beach.set_transform(Mat4::from_translation(-Vec3::Y))?;
+    scene.meshes.push(beach);
+    scene.water.as_mut().unwrap().amplitude = 0.0;
+    let all_effects = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.water.as_mut().unwrap().refraction = false;
+    assert_ne!(all_effects, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().refraction = true;
+    scene.water.as_mut().unwrap().foam_strength = 0.0;
+    assert_ne!(all_effects, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().foam_strength = 1.0;
+    let mut caster = MeshInstance::new(plane(2.0, 0.0, [0.4; 3])?);
+    caster.set_transform(Mat4::from_translation(Vec3::Y * 4.0))?;
+    scene.meshes.push(caster);
+    scene.sun.direction = Vec3::new(-1.0, 2.0, -1.0);
+    let shadows = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.sun.shadows = false;
+    assert_ne!(shadows, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().amplitude = 1.0;
+    renderer.resize(&gpu, 173, 257)?;
+    let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
+    let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
+    let mut fresh = Renderer::new(&gpu, OffscreenTarget::FORMAT, 173, 257)?;
+    assert_eq!(resized, frame(&gpu, &mut fresh, &portrait, &scene)?);
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}

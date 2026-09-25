@@ -2,7 +2,7 @@
 
 A draft of a small 3D engine for building games entirely in code, without a GUI editor.
 
-The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
+The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. An optional realistic water style adds denser geometry, per-pixel wave normals, filtered fine ripples, and GGX sunlight. The island has an irregular coastline, sandy beaches, grass, and rock colors. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
 
 ## Technology Choices
 
@@ -23,6 +23,8 @@ Removing the editor does not make the initial Rust/wgpu build lightweight. The i
 # Include the flake even if it has not been added to Git yet.
 nix develop path:.
 cargo run --release --example island
+# Enable more detailed water shading (press 4 to compare styles).
+cargo run --release --example water -- --realistic-water
 # The original ocean-only scene is still available.
 cargo run --release --example water
 # View the bundled FBX fixture, or provide your own model path.
@@ -45,6 +47,7 @@ For a quicker development build, omit `--release`. Release builds improve CPU-si
 | 1 | Toggle directional shadows |
 | 2 | Toggle refraction and depth absorption |
 | 3 | Toggle shoreline foam |
+| 4 | Switch stylized/realistic water |
 | R | Reset camera, waves, effects, and time to startup settings |
 | Esc | Exit |
 

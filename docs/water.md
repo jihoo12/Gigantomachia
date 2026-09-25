@@ -4,7 +4,7 @@ The water surface combines Gerstner displacement, sky reflections, directional s
 
 ## Geometry and Waves
 
-The mesh is a 256 by 256 cell grid covering 256 meters, with 66,049 vertices and 131,072 triangles. It follows the camera horizontally in one-meter steps. Wave phase is evaluated in world coordinates, so recentering does not restart the waves. The outer part of the patch fades into matching sky haze between 65 and 120 meters.
+The default `Stylized` mesh is a 256 by 256 cell grid covering 256 meters, with 66,049 vertices and 131,072 triangles. It follows the camera horizontally in one-meter steps. Wave phase is evaluated in world coordinates, so recentering does not restart the waves. The outer part of the patch fades into matching sky haze between 65 and 120 meters.
 
 Four Gerstner waves are summed in the vertex shader. For normalized horizontal direction `d`, wavelength `L`, amplitude `A`, and steepness factor `q = 0.45`:
 
@@ -24,6 +24,41 @@ displacement = (q * A * d.x * cos(phase),
 | 7 | 0.12 | (-0.8, -0.2) |
 
 In both examples, the amplitude control multiplies all four amplitudes, with a range of 0–2. The maximum sum of vertical amplitudes is 2.94 meters; the demo camera stays above 3.5 meters. Analytic X/Z derivatives produce the geometric normal via `normalize(cross(tangent_z, tangent_x))`. Two short fragment-shader ripples add surface detail and fade with distance to reduce aliasing. Zero amplitude disables both displacement and ripples.
+
+## Realistic Surface Option
+
+Enable the new surface style in either water demo:
+
+```sh
+cargo run --release --example water -- --realistic-water
+cargo run --release --example island -- --realistic-water
+# Compare identical camera/time settings.
+cargo run --example water -- --headless /tmp/water-stylized.png 1.25
+cargo run --example water -- --realistic-water --headless /tmp/water-realistic.png 1.25
+```
+
+Press `4` to switch between `Stylized` and `Realistic` while running. The default remains `Stylized`. Both styles share wave displacement, time, absorption, refraction, shadows, and shoreline foam. Reset restores the startup style, including the CLI option.
+
+`Realistic` addresses broad, faceted-looking highlights with three changes:
+
+- A 512×512 cell mesh reduces spacing to 0.5 meters across the same patch. It contains 263,169 vertices and 524,288 triangles. The renderer allocates this additional grid on first use and retains it for subsequent toggles (about 8 MiB of vertex/index buffers). Camera recentering remains in one-meter increments for both styles.
+- Large-wave analytic normals are evaluated per fragment using interpolated, undisplaced wave coordinates. Eight directional short waves, from 3.1 m to 4.7 cm, use noise-modulated phases and strengths to break up regular bands and add shading detail without increasing displacement. Screen derivatives filter out unresolved ripples; distance fades detail near the horizon. Zero amplitude disables all of these waves.
+- A GGX sun highlight replaces the artistic power highlight. Correlated Smith visibility and Schlick water Fresnel control the reflection; normal variation across pixels broadens the highlight to reduce sparkle aliasing. The reflected sky excludes its sharp sun disk to avoid counting direct sunlight twice. A darker body tint and restrained backlighting reduce the broad turquoise bands.
+
+The direct specular equations follow the microfacet model described in [Filament's material reference](https://google.github.io/filament/main/filament.html). Sun intensity and scattering are still artistic choices; this option is not a physically complete ocean simulation. Sky reflection is not prefiltered by roughness, and the lighting is not calibrated to physical exposure units.
+
+```rust
+use gigantomachia::water::{Water, WaterStyle};
+
+let water = Water {
+    style: WaterStyle::Realistic,
+    ripple_strength: 1.0,
+    roughness: 0.22,
+    ..Water::default()
+};
+```
+
+`ripple_strength` changes short-wave slopes (0–2), and `roughness` controls the direct sun highlight (0.08–0.6, perceptual). These fields only affect the realistic style. Non-finite values fall back to their defaults during upload. The extra vertices and fragment calculations cost GPU time; use the toggle to choose the desired quality on your hardware.
 
 ## Render Passes and Color Space
 
@@ -71,20 +106,23 @@ There is no shoreline texture or island-specific branch. Any submerged mesh appr
 
 | Field | Default | Behavior |
 | --- | --- | --- |
+| `style` | `WaterStyle::Stylized` | Selects the existing or realistic surface |
+| `ripple_strength` | `1.0` | Realistic short-wave slope multiplier, clamped to 0–2 |
+| `roughness` | `0.22` | Realistic sun-highlight perceptual roughness, clamped to 0.08–0.6 |
 | `refraction` | `true` | Enables submerged color transmission and absorption |
 | `refraction_strength` | `0.7` | Screen displacement multiplier, clamped to 0–1; zero still transmits undistorted color |
 | `absorption` | `[0.42, 0.12, 0.055]` | RGB absorption per meter, clamped to 0–10 |
 | `foam_strength` | `1.0` | Opacity multiplier, clamped to 0–1; zero disables foam |
 | `foam_width` | `1.4` | Vertical depth range in meters, clamped to 0.05–10 |
 
-The demo keys `1`, `2`, and `3` toggle shadows, refraction, and foam independently. The window title shows their state. `R` restores startup settings, including any command-line effect flags. `--no-refraction` disables transmission, not the separate foam or shadow effects.
+The demo keys `1`, `2`, and `3` toggle shadows, refraction, and foam independently; `4` switches surface style. The window title shows their state. `R` restores startup settings, including any command-line effect flags. `--no-refraction` disables transmission, not the separate foam or shadow effects.
 
 ## Current Limits
 
 - Reflections contain the procedural sky only; there are no scene-object reflections, underwater views, caustics, or buoyancy.
 - Only one water surface and one directional shadow map are supported. There are no shadow cascades or point-light shadows. Bias and finite resolution can cause shadow detachment or residual acne at difficult angles.
 - The finite water patch still uses strong horizon haze. This is not an infinite-ocean LOD system.
-- Ripples, foam, and highlights use artistic models rather than a full microfacet/volume model. There is no temporal antialiasing or MSAA, so fine shoreline detail can shimmer.
+- Waves and foam remain procedural; the realistic style adds microfacet direct sunlight but no full volume model. There is no temporal antialiasing or MSAA, so fine shoreline detail can shimmer.
 - Rendering uses one CPU thread and FIFO presentation. The additional shadow pass, HDR attachments, and samples cost GPU time and memory; no performance target is claimed.
 - Long-running clocks and large world coordinates use single-precision floats. Floating-origin and wave-phase precision management remain future work.
 
@@ -102,6 +140,6 @@ cargo run --locked --example island -- --headless /tmp/island-base.png 1.25 --no
 cargo run --locked --example water -- --frames 10
 ```
 
-Six opt-in Vulkan integration tests cover existing scene/resource behavior plus cast shadows on land/water, stale shadow removal, shallow transmission, increased absorption with depth, refraction strength, shallow-only animated foam, dry-land/open-ocean preservation, and resize equivalence to a fresh renderer. Output remains opaque RGBA because transmission is composed in the shader, not through alpha blending. Tests do not compare exact reference pixels across different drivers.
+Opt-in Vulkan integration tests cover existing scene/resource behavior plus cast shadows on land/water, stale shadow removal, shallow transmission, increased absorption with depth, refraction strength, shallow-only animated foam, dry-land/open-ocean preservation, and resize equivalence to a fresh renderer. A realistic-water test additionally covers style switching, ripple/roughness controls, animation, zero-amplitude stability, interaction with refraction/foam/shadows, and resize equivalence. Output remains opaque RGBA because transmission is composed in the shader, not through alpha blending. Tests do not compare exact reference pixels across different drivers.
 
 For an interactive check, resize the window, minimize/restore it, move in diagonal directions, lose focus while moving, pause and adjust the waves, and reset the scene. Confirm that camera movement is independent of wave pause and that zero amplitude produces a calm surface.

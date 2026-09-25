@@ -7,6 +7,7 @@ use gigantomachia::{
     render::{EngineResult, Gpu, OffscreenTarget, Renderer},
     scene::Scene,
     terrain::Island,
+    water::WaterStyle,
 };
 use glam::{Mat4, Vec2, Vec3};
 use std::{fs::File, io::BufWriter, path::Path};
@@ -109,6 +110,13 @@ impl Application for Demo {
             self.speed = (self.speed - 0.1).max(0.0);
         }
         if let Some(water) = &mut self.scene.water {
+            if input.pressed(Key::Digit4) {
+                water.style = if water.style == WaterStyle::Realistic {
+                    WaterStyle::Stylized
+                } else {
+                    WaterStyle::Realistic
+                };
+            }
             if input.pressed(Key::Digit2) {
                 water.refraction = !water.refraction;
             }
@@ -146,7 +154,7 @@ impl Application for Demo {
             );
         }
         format!(
-            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {}",
+            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {} | water {}",
             self.name,
             self.scene.water.map_or(0.0, |water| water.amplitude),
             self.speed,
@@ -161,7 +169,11 @@ impl Application for Demo {
                 "on"
             } else {
                 "off"
-            }
+            },
+            self.scene.water.map_or("none", |water| match water.style {
+                WaterStyle::Stylized => "stylized",
+                WaterStyle::Realistic => "realistic",
+            })
         )
     }
 }
@@ -196,6 +208,11 @@ pub fn run(demo: Demo) -> EngineResult<()> {
 pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> {
     args.retain(|arg| {
         match arg.as_str() {
+            "--realistic-water" => {
+                if let Some(water) = &mut demo.scene.water {
+                    water.style = WaterStyle::Realistic;
+                }
+            }
             "--no-shadows" => demo.scene.sun.shadows = false,
             "--no-refraction" => {
                 if let Some(water) = &mut demo.scene.water {
@@ -216,7 +233,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
         [] => app::run(demo, AppConfig::default()),
         [flag] if flag == "--help" => {
             println!(
-                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam",
+                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --realistic-water --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam | 4: water style",
                 demo.name
             );
             Ok(())

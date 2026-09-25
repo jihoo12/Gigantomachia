@@ -1,6 +1,6 @@
 # Engine Design
 
-Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. There is no editor, ECS, physics system, or render graph yet.
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Water supports selectable stylized and realistic surface shading; the latter uses a lazily allocated denser grid, analytic per-fragment normals, filtered ripples, and GGX sunlight. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. There is no editor, ECS, physics system, or render graph yet.
 
 ## Application, Scene, and Renderer
 

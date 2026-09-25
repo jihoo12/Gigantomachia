@@ -1,7 +1,20 @@
 //! Optional water surface parameters. Playback controls belong to the application.
 
+/// Surface shading and geometry quality. Both modes use the same wave motion and effects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WaterStyle {
+    #[default]
+    Stylized,
+    Realistic,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Water {
+    pub style: WaterStyle,
+    /// Realistic-mode short-wave slope multiplier, clamped to 0..2.
+    pub ripple_strength: f32,
+    /// Realistic-mode perceptual roughness, clamped to 0.08..0.6.
+    pub roughness: f32,
     /// Displacement multiplier, clamped to 0..2 on upload.
     pub amplitude: f32,
     /// Explicit wave time, allowing paused or deterministic rendering.
@@ -23,6 +36,9 @@ pub struct Water {
 impl Default for Water {
     fn default() -> Self {
         Self {
+            style: WaterStyle::Stylized,
+            ripple_strength: 1.0,
+            roughness: 0.22,
             amplitude: 1.0,
             time: 0.0,
             level: 0.0,
