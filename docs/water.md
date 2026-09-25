@@ -1,6 +1,6 @@
 # Water Rendering
 
-The water surface combines Gerstner displacement, sky reflections, directional shadows, screen-space refraction, depth absorption, and animated shoreline foam. It is a visual model, not a fluid simulation; no imported textures or models are required.
+The water surface combines Gerstner displacement, sky and planar scene reflections, directional shadows, screen-space refraction, depth absorption, and animated shoreline foam. It is a visual model, not a fluid simulation; no imported textures or models are required.
 
 ## Geometry and Waves
 
@@ -64,7 +64,7 @@ let water = Water {
 
 Both styles now use irregular gradient fields rather than repeating crossed sine ripples. Each layer uses the analytic derivative of a compact kernel on a simplex lattice. Layers have different scales, rotations, offsets, and drift velocities; the sampled slopes are rotated back into world coordinates before blending. Screen-space derivatives attenuate detail smaller than a pixel. This produces moving patches of reflection instead of long, regularly intersecting highlight bands. The four large displacement waves remain unchanged for ocean scenes.
 
-[Three.js Water](https://github.com/mrdoob/three.js/blob/dev/examples/jsm/objects/Water.js) combines scrolling normal-map samples and a separately rendered planar reflection. This engine uses procedural slope fields, without importing its shader or texture. It still reflects only the procedural sky: scene-object reflections remain a separate future improvement. This change does not claim parity with Three.js or Unreal water rendering.
+[Three.js Water](https://github.com/mrdoob/three.js/blob/dev/examples/jsm/objects/Water.js) combines scrolling normal-map samples and a separately rendered planar reflection. This engine uses procedural slope fields, without importing its shader or texture. A mirrored scene pass now adds above-water object reflections to the procedural sky. This change does not claim parity with Three.js or Unreal water rendering.
 
 ## Water on a Board
 
@@ -73,7 +73,7 @@ cargo run --release --example water_board
 cargo run --example water_board -- --headless /tmp/water-board.png 1.25
 ```
 
-The example places a shallow rectangular surface on an elevated wooden board. Alternating slats remain visible through refraction; a raised wooden rim covers the water edges. It starts with realistic shading, small waves, and foam disabled. The standard pause, camera, style, and effect controls apply. Navigation is unconstrained in this bounded-water example.
+The example places a shallow rectangular surface on an elevated wooden board. Alternating slats remain visible through refraction; a raised wooden rim covers the water edges. Two colored markers make reflected silhouettes easy to identify. It starts with realistic shading, small waves, and foam disabled. The standard pause, camera, style, and effect controls apply. Navigation is unconstrained in this bounded-water example.
 
 ```rust
 use gigantomachia::water::{Water, WaterBounds};
@@ -98,16 +98,27 @@ This is a horizontal surface, not a simulated volume. There are no transparent s
 1. Render opaque mesh casters into a 2048² `Depth32Float` directional shadow map.
 2. Render sky and opaque meshes into `Rgba16Float` HDR scene color plus sampled `Depth32Float` scene depth.
 3. Copy HDR color and depth to separate composition attachments. The water pass samples the original buffers while writing to the copies, avoiding texture read/write feedback.
-4. Draw water with depth testing so dry land is preserved. Combine transmitted scene color, sky reflection, sunlight, and foam in linear HDR space.
-5. Apply exponential exposure compression once in `post.wgsl`; the final sRGB target performs encoding.
+4. Render above-water opaque meshes into a separate mirrored HDR color/depth target when reflections are enabled.
+5. Draw water with depth testing so dry land is preserved. Combine transmitted scene color, sky reflection, sunlight, and foam in linear HDR space.
+6. Apply exponential exposure compression once in `post.wgsl`; the final sRGB target performs encoding.
 
-The engine owns these resources and recreates all screen-sized attachments and bindings together on resize. Windowed and headless rendering use the same passes. At 1280×720, the two HDR colors, two screen depths, and shadow map occupy approximately 37 MiB, excluding meshes, output/surface textures, and driver overhead.
+The engine owns these resources and recreates all screen-sized attachments and bindings together on resize. Windowed and headless rendering use the same passes. At 1280×720, the two HDR colors, two screen depths, reflection color/depth, and shadow map occupy approximately 48 MiB, excluding meshes, output/surface textures, and driver overhead.
 
 ## Directional Shadows
 
 `Scene::sun` contains the direction toward the sun and a shadow toggle. The orthographic shadow volume covers 200 meters in each light-space XY axis and 360 meters of light-space depth around the camera's horizontal position at sea level. Its XY center is snapped to shadow texels. A fallback up vector handles a vertical sun.
 
 Mesh instances reuse the same geometry and transforms in shadow and color passes. The receiver uses 3×3 comparison filtering, raster depth bias, and a small normal/reference offset. Shadows fade at the map edge; receivers outside its volume are lit. Only direct sunlight is attenuated: ambient sky light remains. Water receives mesh shadows on direct scattering, sun reflection/highlights, and foam, but does not cast its own shadow.
+
+## Planar Scene Reflections
+
+`Water::reflections` defaults to true. Press `5` or launch with `--no-reflections` to compare against sky-only reflection. Both styles and bounded/elevated surfaces use the same feature.
+
+The renderer mirrors the camera across `Water::level`, reverses triangle front-face winding, and renders opaque meshes with the existing lighting, shadow map, geometry buffers, and instance transforms. A separate uniform buffer keeps the mirrored and main views independent. Fragment clipping excludes geometry below the mean water plane, including underwater sections of intersecting meshes. The pass never renders water itself.
+
+Reflection color has transparent background coverage, allowing empty pixels to retain the procedural sky. The water shader projects its XZ position on the mean plane into the reflected view, perturbs that point with the surface normal, and blends the sampled scene reflection using the existing Fresnel term. Texture-border fading falls back to sky. Every enabled frame clears the targets, so moving or deleted meshes leave no old reflections. Resize recreates both reflection targets and water bindings.
+
+This adds a full-resolution scene pass and about 10.5 MiB at 1280×720. Targets remain allocated when the feature is disabled, but the extra draw pass is skipped. Reflections also disable when the camera is below the mean water level. This is a single planar approximation: large waves can misalign reflected silhouettes, distortion can show edge artifacts, and roughness does not prefilter scene reflections. There are no recursive reflections or ray tracing.
 
 ## Refraction and Absorption
 
@@ -143,17 +154,18 @@ There is no shoreline texture or island-specific branch. Any submerged mesh appr
 | `style` | `WaterStyle::Stylized` | Selects the existing or realistic surface |
 | `ripple_strength` | `1.0` | Realistic short-wave slope multiplier, clamped to 0–2 |
 | `roughness` | `0.22` | Realistic sun-highlight perceptual roughness, clamped to 0.08–0.6 |
+| `reflections` | `true` | Adds above-water opaque meshes through a mirrored scene pass |
 | `refraction` | `true` | Enables submerged color transmission and absorption |
 | `refraction_strength` | `0.7` | Screen displacement multiplier, clamped to 0–1; zero still transmits undistorted color |
 | `absorption` | `[0.42, 0.12, 0.055]` | RGB absorption per meter, clamped to 0–10 |
 | `foam_strength` | `1.0` | Opacity multiplier, clamped to 0–1; zero disables foam |
 | `foam_width` | `1.4` | Vertical depth range in meters, clamped to 0.05–10 |
 
-The demo keys `1`, `2`, and `3` toggle shadows, refraction, and foam independently; `4` switches surface style. The window title shows their state. `R` restores startup settings, including any command-line effect flags. `--no-refraction` disables transmission, not the separate foam or shadow effects.
+The demo keys `1`, `2`, and `3` toggle shadows, refraction, and foam independently; `4` switches surface style and `5` toggles scene reflections. The window title shows their state. `R` restores startup settings, including any command-line effect flags. `--no-refraction` disables transmission, not the separate foam or shadow effects.
 
 ## Current Limits
 
-- Reflections contain the procedural sky only; there are no scene-object reflections, underwater views, caustics, or buoyancy.
+- Reflections approximate a single horizontal plane and cover opaque meshes plus procedural sky. Underwater views, caustics, and buoyancy remain unsupported.
 - Only one water surface and one directional shadow map are supported. There are no shadow cascades or point-light shadows. Bias and finite resolution can cause shadow detachment or residual acne at difficult angles.
 - The finite water patch still uses strong horizon haze. This is not an infinite-ocean LOD system.
 - Waves and foam remain procedural; the realistic style adds microfacet direct sunlight but no full volume model. There is no temporal antialiasing or MSAA, so fine shoreline detail can shimmer.
@@ -174,6 +186,6 @@ cargo run --locked --example island -- --headless /tmp/island-base.png 1.25 --no
 cargo run --locked --example water -- --frames 10
 ```
 
-Opt-in Vulkan integration tests cover existing scene/resource behavior plus cast shadows on land/water, stale shadow removal, shallow transmission, increased absorption with depth, refraction strength, shallow-only animated foam, dry-land/open-ocean preservation, and resize equivalence to a fresh renderer. A realistic-water test additionally covers style switching, ripple/roughness controls, animation, zero-amplitude stability, interaction with refraction/foam/shadows, and resize equivalence. A bounded-water test checks elevated placement, color transmission, fixed boundaries after camera motion, and both surface styles. Output remains opaque RGBA because transmission is composed in the shader, not through alpha blending. Tests do not compare exact reference pixels across different drivers.
+Opt-in Vulkan integration tests cover existing scene/resource behavior plus cast shadows on land/water, stale shadow removal, shallow transmission, increased absorption with depth, refraction strength, shallow-only animated foam, dry-land/open-ocean preservation, and resize equivalence to a fresh renderer. A realistic-water test additionally covers style switching, ripple/roughness controls, animation, zero-amplitude stability, interaction with refraction/foam/shadows, and resize equivalence. A bounded-water test checks elevated placement, color transmission, fixed boundaries after camera motion, and both surface styles. A reflection test verifies mirrored placement and winding, submerged clipping, transform updates, elevated planes, resize, and stale-reflection removal. Output remains opaque RGBA because transmission is composed in the shader, not through alpha blending. Tests do not compare exact reference pixels across different drivers.
 
 For an interactive check, resize the window, minimize/restore it, move in diagonal directions, lose focus while moving, pause and adjust the waves, and reset the scene. Confirm that camera movement is independent of wave pause and that zero amplitude produces a calm surface.

@@ -22,6 +22,8 @@ struct MeshVertex {
 }
 
 @fragment fn fs_main(in: MeshVertex) -> @location(0) vec4<f32> {
+    // Clip only the mirrored pass; submerged geometry must not become a reflection.
+    if scene.reflection.w > 0.5 && in.world.y < scene.reflection.y + 0.002 { discard; }
     let normal = normalize(in.normal);
     let diffuse = max(dot(normal, scene.sun.xyz), 0.0);
     let ambient = mix(vec3<f32>(0.18, 0.20, 0.18), vec3<f32>(0.42, 0.50, 0.57), normal.y * 0.5 + 0.5);

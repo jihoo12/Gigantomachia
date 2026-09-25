@@ -61,6 +61,8 @@ pub struct Water {
     pub level: f32,
     /// Sample submerged scene color instead of using only the deep-water tint.
     pub refraction: bool,
+    /// Reflect above-water meshes across the mean water plane.
+    pub reflections: bool,
     /// Screen-space refraction displacement multiplier, clamped to 0..1.
     pub refraction_strength: f32,
     /// Beer-Lambert absorption coefficients per meter, in linear RGB.
@@ -82,6 +84,7 @@ impl Default for Water {
             time: 0.0,
             level: 0.0,
             refraction: true,
+            reflections: true,
             refraction_strength: 0.7,
             absorption: [0.42, 0.12, 0.055],
             foam_strength: 1.0,

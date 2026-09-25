@@ -9,7 +9,7 @@ mod water;
 
 use crate::{scene::Scene, water::WaterStyle};
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 pub use gpu::{EngineResult, Gpu, instance};
 use mesh::MeshPass;
 pub use offscreen::OffscreenTarget;
@@ -32,6 +32,8 @@ struct FrameUniforms {
     absorption: [f32; 4],
     surface: [f32; 4],
     water_bounds: [f32; 4],
+    reflection_view_projection: [[f32; 4]; 4],
+    reflection: [f32; 4],
 }
 
 pub struct Renderer {
@@ -40,6 +42,8 @@ pub struct Renderer {
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    reflection_uniforms: wgpu::Buffer,
+    reflection_binding: wgpu::BindGroup,
     shadow: ShadowMap,
     shadow_binding: wgpu::BindGroup,
     targets: SceneTargets,
@@ -106,6 +110,29 @@ fn pipeline(
     buffers: &[wgpu::VertexBufferLayout<'_>],
     depth: Option<bool>,
 ) -> wgpu::RenderPipeline {
+    pipeline_with_winding(
+        gpu,
+        format,
+        label,
+        source,
+        layouts,
+        buffers,
+        depth,
+        wgpu::FrontFace::Ccw,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pipeline_with_winding(
+    gpu: &Gpu,
+    format: wgpu::TextureFormat,
+    label: &str,
+    source: &str,
+    layouts: &[&wgpu::BindGroupLayout],
+    buffers: &[wgpu::VertexBufferLayout<'_>],
+    depth: Option<bool>,
+    front_face: wgpu::FrontFace,
+) -> wgpu::RenderPipeline {
     let shader = gpu
         .device
         .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -140,6 +167,7 @@ fn pipeline(
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
+                front_face,
                 cull_mode: if depth == Some(true) {
                     Some(wgpu::Face::Back)
                 } else {
@@ -234,6 +262,30 @@ impl Renderer {
                 },
             ],
         });
+        let reflection_uniforms = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("reflection-frame-uniforms"),
+            size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let reflection_binding = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene-frame-bindings"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: reflection_uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow.sampler),
+                },
+            ],
+        });
         let water_layout = targets::water_layout(gpu);
         let post_layout = gpu
             .device
@@ -279,6 +331,8 @@ impl Renderer {
             targets: SceneTargets::new(gpu, width, height, &water_layout, &post_layout),
             uniforms,
             bind_group,
+            reflection_uniforms,
+            reflection_binding,
             shadow,
             shadow_binding,
             water_layout,
@@ -310,8 +364,15 @@ impl Renderer {
         self.water.prepare(gpu, scene.water.is_some() && detailed);
         let sun = scene.sun.direction();
         let matrix = camera.view_projection(self.width as f32 / self.height as f32);
+        let reflection_enabled =
+            scene.water.is_some() && water.reflections && camera.position.y > water.level;
+        let mirror = Mat4::from_translation(Vec3::Y * (2.0 * water.level))
+            * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
+        let reflection_matrix = matrix * mirror;
         let spacing = GRID_EXTENT / GRID_CELLS as f32;
         let uniforms = FrameUniforms {
+            reflection_view_projection: reflection_matrix.to_cols_array_2d(),
+            reflection: [f32::from(reflection_enabled), water.level, 0.0, 0.0],
             view_projection: matrix.to_cols_array_2d(),
             inverse_view_projection: matrix.inverse().to_cols_array_2d(),
             light_view_projection: shadow::matrix(
@@ -369,6 +430,15 @@ impl Renderer {
         };
         gpu.queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
+        if reflection_enabled {
+            let mut reflected = uniforms;
+            reflected.view_projection = reflection_matrix.to_cols_array_2d();
+            reflected.inverse_view_projection = reflection_matrix.inverse().to_cols_array_2d();
+            reflected.camera_time[1] = 2.0 * water.level - camera.position.y;
+            reflected.reflection[3] = 1.0;
+            gpu.queue
+                .write_buffer(&self.reflection_uniforms, 0, bytemuck::bytes_of(&reflected));
+        }
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -422,6 +492,32 @@ impl Renderer {
             pass.set_pipeline(&self.sky);
             pass.draw(0..3, 0..1);
             self.meshes.encode(&mut pass, &scene.meshes);
+        }
+        if reflection_enabled {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("planar-reflection-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.targets.reflection_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.targets.reflection_depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_bind_group(0, &self.reflection_binding, &[]);
+            self.meshes.encode_reflection(&mut pass, &scene.meshes);
         }
         let extent = wgpu::Extent3d {
             width: self.width,

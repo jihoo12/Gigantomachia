@@ -650,3 +650,90 @@ fn bounded_water_stays_on_its_board_when_camera_moves() -> EngineResult<()> {
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> EngineResult<()> {
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    // Single-sided +Z face catches incorrect mirrored winding.
+    let vertices = [
+        [-1.5, 1.0, 0.0],
+        [1.5, 1.0, 0.0],
+        [1.5, 3.0, 0.0],
+        [-1.5, 3.0, 0.0],
+    ]
+    .map(|position| Vertex {
+        position,
+        normal: [0.0, 0.0, 1.0],
+        color: [0.9, 0.015, 0.01],
+    });
+    let object = MeshInstance::new(Arc::new(Mesh::new(
+        vertices.to_vec(),
+        vec![0, 1, 2, 0, 2, 3],
+    )?));
+    let mut scene = Scene {
+        camera: Camera::looking_at(Vec3::new(0.0, 4.0, 8.0), Vec3::ZERO)?,
+        meshes: vec![object],
+        water: Some(Water {
+            amplitude: 0.0,
+            refraction: false,
+            foam_strength: 0.0,
+            reflections: false,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    scene.sun.shadows = false;
+    scene.sun.direction = Vec3::new(0.0, 1.0, 1.0);
+    let without = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.water.as_mut().unwrap().reflections = true;
+    let mirrored = frame(&gpu, &mut renderer, &target, &scene)?;
+    let pixel = pixel_at(&scene.camera, Vec3::new(0.0, -2.0, 0.0), 320, 180);
+    assert!(
+        u16::from(mirrored[pixel]) > u16::from(without[pixel]) + 15,
+        "red object must appear at its mirrored position: {:?} / {:?}",
+        &mirrored[pixel..pixel + 4],
+        &without[pixel..pixel + 4]
+    );
+    let object_pixel = pixel_at(&scene.camera, Vec3::new(0.0, 2.0, 0.0), 320, 180);
+    assert_eq!(
+        &without[object_pixel..object_pixel + 4],
+        &mirrored[object_pixel..object_pixel + 4]
+    );
+    scene.meshes[0].set_transform(Mat4::from_translation(Vec3::new(3.0, 0.0, 0.0)))?;
+    assert_ne!(mirrored, frame(&gpu, &mut renderer, &target, &scene)?);
+    assert_eq!(renderer.resident_meshes(), 1);
+    scene.meshes[0].set_transform(Mat4::from_translation(Vec3::Y * -4.0))?;
+    let submerged = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.water.as_mut().unwrap().reflections = false;
+    assert_eq!(
+        submerged,
+        frame(&gpu, &mut renderer, &target, &scene)?,
+        "submerged meshes must not appear in reflections"
+    );
+    // Use an elevated mean plane and realistic shading after resizing.
+    scene.meshes[0].set_transform(Mat4::from_translation(Vec3::Y * 1.0))?;
+    scene.water.as_mut().unwrap().level = 1.0;
+    scene.water.as_mut().unwrap().style = gigantomachia::water::WaterStyle::Realistic;
+    scene.water.as_mut().unwrap().reflections = true;
+    renderer.resize(&gpu, 173, 257)?;
+    let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
+    let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
+    let mut fresh = Renderer::new(&gpu, OffscreenTarget::FORMAT, 173, 257)?;
+    assert_eq!(resized, frame(&gpu, &mut fresh, &portrait, &scene)?);
+    scene.meshes.clear();
+    let empty = frame(&gpu, &mut renderer, &portrait, &scene)?;
+    scene.water.as_mut().unwrap().reflections = false;
+    assert_eq!(
+        empty,
+        frame(&gpu, &mut renderer, &portrait, &scene)?,
+        "removed objects must not leave stale reflections"
+    );
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}

@@ -51,6 +51,7 @@ struct WaterVertex {
 @group(1) @binding(0) var opaque_color: texture_2d<f32>;
 @group(1) @binding(1) var color_sampler: sampler;
 @group(1) @binding(2) var opaque_depth: texture_depth_2d;
+@group(1) @binding(3) var reflection_color: texture_2d<f32>;
 
 fn scene_depth(uv: vec2<f32>) -> f32 {
     let size = vec2<i32>(textureDimensions(opaque_depth));
@@ -144,6 +145,22 @@ fn sun_glint(normal: vec3<f32>, view: vec3<f32>, alpha: f32) -> vec3<f32> {
     return vec3<f32>(1.8, 1.58, 1.30) * distribution * masking * fresnel * nl;
 }
 
+// Alpha is coverage of reflected opaque geometry; clear pixels retain the procedural sky.
+fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
+    if scene.reflection.x < 0.5 { return fallback; }
+    let plane_point = vec3<f32>(world.x, scene.water.w, world.z);
+    let warped = plane_point + vec3<f32>(normal.x, 0.0, normal.z) * 0.25;
+    let clip = scene.reflection_view_projection * vec4<f32>(warped, 1.0);
+    if clip.w <= 0.0 { return fallback; }
+    let uv = clip.xy / clip.w * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) { return fallback; }
+    let sample_color = textureSampleLevel(reflection_color, color_sampler, uv, 0.0);
+    let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
+    let fade = smoothstep(0.0, 0.025, edge);
+    // Linear filtering of clear pixels produces premultiplied edge color.
+    return fallback * (1.0 - sample_color.a * fade) + sample_color.rgb * fade;
+}
+
 @fragment fn fs_main(in: WaterVertex) -> @location(0) vec4<f32> {
     let view = normalize(scene.camera_time.xyz - in.world);
     let distance = length(scene.camera_time.xyz - in.world);
@@ -210,11 +227,11 @@ fn sun_glint(normal: vec3<f32>, view: vec3<f32>, alpha: f32) -> vec3<f32> {
         }
     }
     let reflected = reflect(-view, normal);
-    var color = mix(body, sky_lighting(reflected, visibility), fresnel);
+    var color = mix(body, reflected_scene(in.world, normal, sky_lighting(reflected, visibility)), fresnel);
     color += vec3<f32>(1.0, 0.78, 0.46) * specular * 4.0 * visibility;
     if scene.surface.x > 0.5 {
         // The direct sun is integrated by GGX, so exclude the sharp sky sun disk here.
-        let reflection = sky_lighting(reflected, 0.0);
+        let reflection = reflected_scene(in.world, normal, sky_lighting(reflected, 0.0));
         color = mix(body, reflection, fresnel) + sun_glint(normal, view, alpha) * visibility;
     }
 

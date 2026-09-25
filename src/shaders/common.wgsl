@@ -9,6 +9,8 @@ struct Uniforms {
     absorption: vec4<f32>,
     surface: vec4<f32>,
     water_bounds: vec4<f32>,
+    reflection_view_projection: mat4x4<f32>,
+    reflection: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> scene: Uniforms;
 @group(0) @binding(1) var shadow_depth: texture_depth_2d;

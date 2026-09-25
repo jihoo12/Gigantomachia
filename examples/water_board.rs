@@ -84,6 +84,17 @@ fn main() -> EngineResult<()> {
             )?);
         }
     }
+    // Colored markers make reflected silhouettes easy to compare with the 5 key.
+    meshes.push(cuboid(
+        Vec3::new(-1.2, 2.10, -1.5),
+        Vec3::new(0.3, 0.85, 0.3),
+        [0.72, 0.035, 0.015],
+    )?);
+    meshes.push(cuboid(
+        Vec3::new(1.5, 1.80, -1.7),
+        Vec3::new(0.3, 0.55, 0.3),
+        [0.035, 0.28, 0.65],
+    )?);
     let scene = Scene {
         camera: Camera::looking_at(Vec3::new(6.5, 5.5, 7.5), Vec3::new(0.0, 1.1, 0.0))?,
         meshes,

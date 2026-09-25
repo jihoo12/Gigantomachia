@@ -22,6 +22,7 @@ struct GpuMesh {
 pub(super) struct MeshPass {
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    reflection_pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     geometry: HashMap<u64, GpuMesh>,
     objects: Vec<(wgpu::Buffer, wgpu::BindGroup)>,
@@ -99,6 +100,16 @@ impl MeshPass {
                 cache: None,
             });
         Self {
+            reflection_pipeline: super::pipeline_with_winding(
+                gpu,
+                format,
+                "reflection-mesh",
+                &source,
+                &[frame_layout, &layout],
+                std::slice::from_ref(&vertex_layout),
+                Some(true),
+                wgpu::FrontFace::Cw,
+            ),
             shadow_pipeline,
             pipeline: pipeline(
                 gpu,
@@ -163,6 +174,10 @@ impl MeshPass {
 
     pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>, instances: &[MeshInstance]) {
         self.encode_with(pass, instances, &self.pipeline);
+    }
+
+    pub fn encode_reflection(&self, pass: &mut wgpu::RenderPass<'_>, instances: &[MeshInstance]) {
+        self.encode_with(pass, instances, &self.reflection_pipeline);
     }
 
     pub fn encode_shadow(&self, pass: &mut wgpu::RenderPass<'_>, instances: &[MeshInstance]) {

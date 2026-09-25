@@ -13,6 +13,8 @@ pub(super) struct SceneTargets {
     pub composite_view: wgpu::TextureView,
     pub water_depth: wgpu::Texture,
     pub water_depth_view: wgpu::TextureView,
+    pub reflection_view: wgpu::TextureView,
+    pub reflection_depth_view: wgpu::TextureView,
     pub water_inputs: wgpu::BindGroup,
     pub post_inputs: wgpu::BindGroup,
 }
@@ -66,6 +68,14 @@ impl SceneTargets {
         let opaque_depth_view = opaque_depth.create_view(&Default::default());
         let composite_view = composite_color.create_view(&Default::default());
         let water_depth_view = water_depth.create_view(&Default::default());
+        let reflection_view = texture(
+            "reflection-hdr",
+            HDR_FORMAT,
+            U::RENDER_ATTACHMENT | U::TEXTURE_BINDING,
+        )
+        .create_view(&Default::default());
+        let reflection_depth_view = texture("reflection-depth", DEPTH_FORMAT, U::RENDER_ATTACHMENT)
+            .create_view(&Default::default());
         let sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("refraction-sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -73,7 +83,7 @@ impl SceneTargets {
             ..Default::default()
         });
         let water_inputs = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("refraction-inputs"),
+            label: Some("water-inputs"),
             layout: water_layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -87,6 +97,10 @@ impl SceneTargets {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&opaque_depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&reflection_view),
                 },
             ],
         });
@@ -107,6 +121,8 @@ impl SceneTargets {
             composite_view,
             water_depth,
             water_depth_view,
+            reflection_view,
+            reflection_depth_view,
             water_inputs,
             post_inputs,
         }
@@ -139,6 +155,16 @@ pub(super) fn water_layout(gpu: &Gpu) -> wgpu::BindGroupLayout {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },

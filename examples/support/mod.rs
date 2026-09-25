@@ -110,6 +110,9 @@ impl Application for Demo {
             self.speed = (self.speed - 0.1).max(0.0);
         }
         if let Some(water) = &mut self.scene.water {
+            if input.pressed(Key::Digit5) {
+                water.reflections = !water.reflections;
+            }
             if input.pressed(Key::Digit4) {
                 water.style = if water.style == WaterStyle::Realistic {
                     WaterStyle::Stylized
@@ -154,7 +157,7 @@ impl Application for Demo {
             );
         }
         format!(
-            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {} | water {}",
+            "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {} | water {} · reflections {}",
             self.name,
             self.scene.water.map_or(0.0, |water| water.amplitude),
             self.speed,
@@ -173,7 +176,12 @@ impl Application for Demo {
             self.scene.water.map_or("none", |water| match water.style {
                 WaterStyle::Stylized => "stylized",
                 WaterStyle::Realistic => "realistic",
-            })
+            }),
+            if self.scene.water.is_some_and(|w| w.reflections) {
+                "on"
+            } else {
+                "off"
+            }
         )
     }
 }
@@ -213,6 +221,11 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
                     water.style = WaterStyle::Realistic;
                 }
             }
+            "--no-reflections" => {
+                if let Some(water) = &mut demo.scene.water {
+                    water.reflections = false;
+                }
+            }
             "--no-shadows" => demo.scene.sun.shadows = false,
             "--no-refraction" => {
                 if let Some(water) = &mut demo.scene.water {
@@ -233,7 +246,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
         [] => app::run(demo, AppConfig::default()),
         [flag] if flag == "--help" => {
             println!(
-                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --realistic-water --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam | 4: water style",
+                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --no-reflections --realistic-water --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam | 4: water style | 5: scene reflections",
                 demo.name
             );
             Ok(())

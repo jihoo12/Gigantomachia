@@ -14,7 +14,7 @@ examples/water.rs, examples/island.rs, or examples/fbx.rs
                   Renderer::render(gpu, target, scene)
                   shadow map → opaque HDR color/depth
                          |
-                  refractive water → tone mapping → submission
+                  planar mesh reflection → refractive water → tone mapping → submission
 ```
 
 | Layer | Owns | Does not own |
@@ -73,7 +73,7 @@ Rigid FBX clips are sampled through `AnimatedFbx` using an application-owned clo
 - CPU meshes are immutable and have stable IDs. Cloning a `Scene` clones mesh `Arc`s, not vertex arrays.
 - The renderer uploads each distinct mesh once while it remains referenced by the current scene. Multiple instances reuse the same GPU geometry and have separate transform uniforms.
 - Mesh assets absent from the next rendered scene are evicted; instance uniform slots are resized to the current instance count. Removing and later re-adding a mesh uploads it again.
-- Frame resources belong to `Renderer`: a 2048² shadow depth map, opaque HDR color/depth, and separate composite HDR color/water depth. The water depth attachment receives a copy of opaque depth, while the original stays read-only for refraction/foam. Size-dependent targets and all their sampling bindings are recreated together on resize. Passes encode draw calls; only the renderer submits the frame command buffer.
+- Frame resources belong to `Renderer`: a 2048² shadow depth map, opaque HDR color/depth, separate composite HDR color/water depth, and mirrored reflection HDR color/depth. The water depth attachment receives a copy of opaque depth, while the original stays read-only for refraction/foam. Size-dependent targets and all their sampling bindings are recreated together on resize. Passes encode draw calls; only the renderer submits the frame command buffer.
 - Suspend drops window/GPU resources but preserves application-owned CPU scene data. Resume recreates resources and uploads geometry as needed.
 
 This is a small forward renderer: no GPU instancing, visibility culling, batching, asynchronous asset streaming, or multi-scene cache is implemented yet.
@@ -96,4 +96,4 @@ Right-handed coordinates, Y-up, local camera forward -Z, meters, and column-vect
 
 CPU tests cover camera projection/movement, input transitions, mesh validation, grid winding, deterministic terrain, and directional shadow projection. Opt-in Vulkan integration tests use only the public engine API to check wave animation, zero-amplitude stability, resize/readback alignment, island visibility, shared geometry, transform updates, cache eviction, optional water, depth occlusion with effects disabled, cast shadows on land/water, refraction/absorption, shallow-only foam, and resize equivalence to fresh render targets.
 
-Screen-space refraction, depth absorption, and shoreline foam are implemented; see [water rendering](water.md) for equations and limitations. Underwater views, scene-object reflections, shadow cascades, and ocean LOD remain future rendering work. Reusable material/asset handles, ECS, and static glTF loading are also still pending.
+Screen-space refraction, depth absorption, and shoreline foam are implemented; see [water rendering](water.md) for equations and limitations. Underwater views, rough reflection filtering, shadow cascades, and ocean LOD remain future rendering work. Reusable material/asset handles, ECS, and static glTF loading are also still pending.
