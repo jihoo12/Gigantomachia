@@ -1,5 +1,6 @@
 //! Reusable forward renderer. Owns frame resources, draw order, and GPU mesh caching.
 
+mod flow;
 mod gpu;
 mod mesh;
 mod offscreen;
@@ -45,6 +46,7 @@ pub struct Renderer {
     sky: wgpu::RenderPipeline,
     water: WaterPass,
     waterfall: waterfall::WaterfallPass,
+    flow: flow::FlowSimulation,
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -293,6 +295,7 @@ impl Renderer {
             ],
         });
         let water_layout = targets::water_layout(gpu);
+        let flow_layout = flow::FlowSimulation::layout(gpu);
         let post_layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -324,7 +327,8 @@ impl Renderer {
                 Some(false),
             ),
             waterfall: waterfall::WaterfallPass::new(gpu, &layout, &water_layout),
-            water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout),
+            water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout, &flow_layout),
+            flow: flow::FlowSimulation::new(gpu, &flow_layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
                 gpu,
@@ -465,6 +469,7 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("scene-frame"),
             });
+        self.flow.update(gpu, &mut encoder, scene);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sun-shadow-pass"),
@@ -580,6 +585,7 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
+            pass.set_bind_group(2, self.flow.binding(), &[]);
             self.water.encode(&mut pass, detailed || secondary_detailed, 1 + u32::from(secondary_water.is_some()));
             if water.waterfall.is_some() {
                 self.waterfall.encode(&mut pass);
