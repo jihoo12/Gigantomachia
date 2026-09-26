@@ -6,11 +6,12 @@
 use super::Gpu;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
+use std::sync::mpsc;
 pub(super) const FLOW_W: u32 = 64;
 pub(super) const FLOW_H: u32 = 128;
 #[repr(C)] #[derive(Clone, Copy, Pod, Zeroable)]
 struct FlowParams { bounds:[f32;4], source:[f32;4], direction:[f32;4], upper:[f32;4], outlet:[f32;4], inflow:[f32;4] }
-pub(super) struct FluidSimulation { pipeline:wgpu::ComputePipeline, bind_groups:[wgpu::BindGroup;2], upper_bind_groups:[wgpu::BindGroup;2], params:wgpu::Buffer, upper_params:wgpu::Buffer, upper_buffers:[wgpu::Buffer;2], debug_readback:wgpu::Buffer, current:usize, upper_current:usize, debug_frame:u32 }
+pub(super) struct FluidSimulation { pipeline:wgpu::ComputePipeline, bind_groups:[wgpu::BindGroup;2], upper_bind_groups:[wgpu::BindGroup;2], params:wgpu::Buffer, upper_params:wgpu::Buffer, upper_buffers:[wgpu::Buffer;2], debug_readback:wgpu::Buffer, current:usize, upper_current:usize, debug_frame:u32, debug_rx:Option<mpsc::Receiver<Result<(),wgpu::BufferAsyncError>>> }
 impl FluidSimulation {
  pub fn layout(gpu:&Gpu)->wgpu::BindGroupLayout { gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:Some("water-flow-layout"),entries:&[
   wgpu::BindGroupLayoutEntry{binding:0,visibility:wgpu::ShaderStages::COMPUTE|wgpu::ShaderStages::VERTEX_FRAGMENT,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:true},has_dynamic_offset:false,min_binding_size:None},count:None},
@@ -32,9 +33,33 @@ impl FluidSimulation {
   let pl=gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:Some("water-flow-pipeline-layout"),bind_group_layouts:&[layout],push_constant_ranges:&[]});
   let pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("water-flow-simulation"),layout:Some(&pl),module:&shader,entry_point:Some("cs_main"),compilation_options:Default::default(),cache:None});
   let debug_readback=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("water-upper-debug-readback"),size:(FLOW_W*FLOW_H*16) as u64,usage:wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
-  Self{pipeline,bind_groups,upper_bind_groups,params,upper_params,upper_buffers:[upper_a,upper_b],debug_readback,current:0,upper_current:0,debug_frame:0}
+  Self{pipeline,bind_groups,upper_bind_groups,params,upper_params,upper_buffers:[upper_a,upper_b],debug_readback,current:0,upper_current:0,debug_frame:0,debug_rx:None}
  }
  pub fn update(&mut self,gpu:&Gpu,encoder:&mut wgpu::CommandEncoder,scene:&crate::scene::Scene){
+  // Finish the previous sparse readback without blocking the render loop.
+  if let Some(rx)=&self.debug_rx {
+   if let Ok(result)=rx.try_recv() {
+    if result.is_ok() {
+     let bytes=self.debug_readback.slice(..).get_mapped_range();
+     let states:&[[f32;4]]=bytemuck::cast_slice(&bytes);
+     let mut mass=0.0f32; let mut max_depth=-f32::INFINITY; let mut max_speed=0.0f32;
+     let mut lip_depth=0.0f32; let mut lip_speed=0.0f32; let mut lip_flux=0.0f32; let mut lip_n=0u32;
+     for (i,v) in states.iter().enumerate() {
+      mass+=v[0]; max_depth=max_depth.max(v[0]); max_speed=max_speed.max((v[1]*v[1]+v[2]*v[2]).sqrt());
+      let y=i as u32/FLOW_W; let x=i as u32%FLOW_W;
+      if y+3>=FLOW_H && x>=FLOW_W/2-8 && x<=FLOW_W/2+8 {
+       let speed=(v[1]*v[1]+v[2]*v[2]).sqrt();
+       lip_depth+=v[0]; lip_speed+=speed; lip_flux+=max_depth.max(0.0)*speed; lip_n+=1;
+      }
+     }
+     let n=lip_n.max(1) as f32;
+     eprintln!("[fluid upper] mass={:.4} lip_depth={:.5} lip_speed={:.5} outflow~={:.5} max_depth={:.5} max_speed={:.5}",
+      mass,lip_depth/n,lip_speed/n,lip_flux/n,max_depth,max_speed);
+     drop(bytes); self.debug_readback.unmap();
+    }
+    self.debug_rx=None;
+   }
+  }
   let (Some(lower),Some(upper))=(scene.secondary_water,scene.water) else{return}; let Some(bounds)=lower.bounds else{return}; let Some(fall)=upper.waterfall else{return};
   let dir=fall.direction.normalize_or_zero(); let flight=(2.0*fall.drop.max(0.05)/9.81).sqrt(); let landing=glam::Vec2::new(fall.origin.x, fall.origin.z)+dir*(0.22+1.3*flight);
   let upper_bounds=upper.bounds.unwrap_or(bounds);
@@ -75,8 +100,11 @@ impl FluidSimulation {
   self.debug_frame=self.debug_frame.wrapping_add(1);
   // Copy the current upper state periodically. Mapping/printing happens on a sparse
   // cadence so diagnostics do not become part of the simulation's hot path.
-  if self.debug_frame%120==0 {
+  if self.debug_frame%120==0 && self.debug_rx.is_none() {
    encoder.copy_buffer_to_buffer(&self.upper_buffers[self.upper_current],0,&self.debug_readback,0,(FLOW_W*FLOW_H*16) as u64);
+   let (tx,rx)=mpsc::channel();
+   self.debug_readback.slice(..).map_async(wgpu::MapMode::Read,move |r|{let _=tx.send(r);});
+   self.debug_rx=Some(rx);
   }
   let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor{label:Some("water-flow-simulation"),timestamp_writes:None}); pass.set_pipeline(&self.pipeline); pass.set_bind_group(0,&self.bind_groups[self.current],&[]); pass.dispatch_workgroups(FLOW_W.div_ceil(8),FLOW_H.div_ceil(8),1); drop(pass); self.current^=1;
  }
