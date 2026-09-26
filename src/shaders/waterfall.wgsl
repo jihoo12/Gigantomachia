@@ -94,8 +94,16 @@ fn corner(index: u32) -> vec2<f32> {
 
     // Sample the UPPER fluid domain at the physical lip. The renderer binds the upper
     // state here, so geometry is created from simulation state rather than a sheet mask.
-    let source_world = origin.xz + across.xz * ((lateral_u - 0.5) * width);
-    let fluid = spill_flow_sample(source_world);
+    let lateral = (lateral_u - 0.5) * width;
+    let source_world = origin.xz + across.xz * lateral;
+    // Reconstruct a continuous lip state from neighbouring producer cells. Each ribbon
+    // still carries local flux, but adjacent vertices now share interpolated boundary
+    // conditions instead of behaving like disconnected strands.
+    let cell_world = width / 64.0;
+    let fluid_l = spill_flow_sample(source_world - across.xz * cell_world);
+    let fluid_c = spill_flow_sample(source_world);
+    let fluid_r = spill_flow_sample(source_world + across.xz * cell_world);
+    let fluid = fluid_c * 0.50 + (fluid_l + fluid_r) * 0.25;
     let outward = max(dot(fluid.yz, forward.xz), 0.0);
     let depth = max(0.055 + fluid.x, 0.0);
     let flux = depth * outward;
@@ -114,9 +122,20 @@ fn corner(index: u32) -> vec2<f32> {
     let jitter = (fbm(vec2<f32>(f32(lip_cell) * 0.31, time * 0.17 + path_u * 2.0)) - 0.5)
         * width * 0.008 * path_u;
 
+    // The simulated boundary is at the water-domain edge (z ~= 2.32), while the
+    // wooden front rim extends to z ~= 2.50. Move the free-flight origin just beyond
+    // that solid lip; otherwise the ballistic surface visibly passes through the wood.
+    // Scale the clearance from the small gap between the declared spill origin and the
+    // water bound so the renderer remains tied to scene geometry rather than a waterfall
+    // effect constant.
+    let domain_edge = scene.water_bounds.xy + forward.xz * scene.water_bounds.zw;
+    let boundary_gap = max(dot(domain_edge - origin.xz, forward.xz), 0.0);
+    let lip_clearance = max(boundary_gap + 0.18, 0.19);
+    let flight_origin = origin + forward * lip_clearance;
+
     var out: SpillVertex;
     out.kind = 1u;
-    out.world = origin
+    out.world = flight_origin
         + across * (contracted + lateral_velocity * t + jitter)
         + forward * (exit_speed * t)
         - vec3<f32>(0.0, 0.5 * 9.81 * t * t, 0.0);
