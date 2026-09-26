@@ -14,7 +14,7 @@ examples/water.rs, examples/island.rs, or examples/fbx.rs
                   Renderer::render(gpu, target, scene)
                   shadow map → opaque HDR color/depth
                          |
-                  planar mesh reflection → refractive water → tone mapping → submission
+                  planar mesh reflection → refractive water → optional spill → tone mapping → submission
 ```
 
 | Layer | Owns | Does not own |

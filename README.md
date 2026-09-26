@@ -25,7 +25,7 @@ nix develop path:.
 cargo run --release --example island
 # Enable more detailed water shading (press 4 to compare styles).
 cargo run --release --example water -- --realistic-water
-# Shallow water on a wooden board with a raised rim.
+# Shallow water spilling from a wooden board into a puddle.
 cargo run --release --example water_board
 # The original ocean-only scene is still available.
 cargo run --release --example water
@@ -106,7 +106,7 @@ src/terrain.rs         Seeded island heightfield generator
 src/render/            GPU, shadow/HDR/water passes, frame targets, readback
 src/shaders/           Lighting, shadows, refraction, foam, and tone mapping
 examples/water.rs      Ocean scene setup
-examples/water_board.rs Bounded shallow water on a wooden board
+examples/water_board.rs Bounded water, falling sheet, and splash demo
 examples/island.rs     Island scene setup
 examples/fbx.rs        FBX viewer with optional animation
 examples/support/     Demo controls, CLI, and PNG writing
@@ -119,7 +119,7 @@ docs/water.md          Water model and limitations
 docs/island.md         Island generation and limitations
 ```
 
-See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), [island notes](docs/island.md), [FBX import guide](docs/fbx.md), and [animation guide](docs/animation.md). The renderer owns GPU resources and frame submission; examples only provide scene data and application behavior.
+See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), [island notes](docs/island.md), [FBX import guide](docs/fbx.md), [animation guide](docs/animation.md), and [falling-water guide](docs/waterfall.md). The renderer owns GPU resources and frame submission; examples only provide scene data and application behavior.
 
 Project documentation is written in English. Completed work is validated and committed to Git.
 

@@ -6,6 +6,7 @@ mod offscreen;
 mod shadow;
 mod targets;
 mod water;
+mod waterfall;
 
 use crate::{scene::Scene, water::WaterStyle};
 use bytemuck::{Pod, Zeroable};
@@ -32,6 +33,8 @@ struct FrameUniforms {
     absorption: [f32; 4],
     surface: [f32; 4],
     water_bounds: [f32; 4],
+    waterfall_origin: [f32; 4],
+    waterfall_shape: [f32; 4],
     reflection_view_projection: [[f32; 4]; 4],
     reflection: [f32; 4],
 }
@@ -39,6 +42,7 @@ struct FrameUniforms {
 pub struct Renderer {
     sky: wgpu::RenderPipeline,
     water: WaterPass,
+    waterfall: waterfall::WaterfallPass,
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -317,6 +321,7 @@ impl Renderer {
                 &[],
                 Some(false),
             ),
+            waterfall: waterfall::WaterfallPass::new(gpu, &layout),
             water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
@@ -399,6 +404,12 @@ impl Renderer {
                 water.foam_strength.clamp(0.0, 1.0),
                 water.foam_width.clamp(0.05, 10.0),
             ],
+            waterfall_origin: water
+                .waterfall
+                .map_or([0.0; 4], |f| [f.origin.x, f.origin.y, f.origin.z, f.width]),
+            waterfall_shape: water
+                .waterfall
+                .map_or([0.0; 4], |f| [f.direction.x, f.direction.y, f.drop, 1.0]),
             water_bounds: water.bounds.map_or([0.0; 4], |bounds| {
                 [
                     bounds.center.x,
@@ -560,6 +571,9 @@ impl Renderer {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
             self.water.encode(&mut pass, detailed);
+            if water.waterfall.is_some() {
+                self.waterfall.encode(&mut pass);
+            }
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

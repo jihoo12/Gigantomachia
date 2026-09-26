@@ -737,3 +737,67 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
     }
     Ok(())
 }
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn waterfall_animates_with_water_clock_and_preserves_mesh_cache() -> EngineResult<()> {
+    use gigantomachia::water::{WaterBounds, Waterfall};
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    let spill = Waterfall::new(Vec3::new(0.0, 1.5, 0.0), glam::Vec2::Y, 1.5, 1.47)?;
+    let mut scene = Scene {
+        camera: Camera::looking_at(Vec3::new(3.0, 3.5, 6.0), Vec3::new(0.0, 0.7, 0.0))?,
+        meshes: vec![MeshInstance::new(plane(8.0, 0.0, [0.25; 3])?)],
+        water: Some(Water {
+            level: 1.5,
+            amplitude: 0.0,
+            foam_strength: 0.0,
+            bounds: Some(WaterBounds::new(
+                glam::Vec2::new(0.0, -2.0),
+                glam::Vec2::splat(2.0),
+            )?),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let still = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.water.as_mut().unwrap().waterfall = Some(spill);
+    let flow = frame(&gpu, &mut renderer, &target, &scene)?;
+    let changed = still
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(flow.as_chunks::<4>().0)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        changed > 100,
+        "spill and puddle must cover visible pixels: {changed}"
+    );
+    assert_eq!(
+        flow,
+        frame(&gpu, &mut renderer, &target, &scene)?,
+        "fixed time must freeze the entire spill"
+    );
+    scene.water.as_mut().unwrap().time = 0.75;
+    assert_ne!(flow, frame(&gpu, &mut renderer, &target, &scene)?);
+    assert_eq!(
+        renderer.resident_meshes(),
+        1,
+        "procedural spill must not create CPU mesh assets per frame"
+    );
+    scene.water.as_mut().unwrap().waterfall = None;
+    assert_eq!(still, frame(&gpu, &mut renderer, &target, &scene)?);
+    scene.water.as_mut().unwrap().waterfall = Some(spill);
+    renderer.resize(&gpu, 173, 257)?;
+    let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
+    let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
+    let mut fresh = Renderer::new(&gpu, OffscreenTarget::FORMAT, 173, 257)?;
+    assert_eq!(resized, frame(&gpu, &mut fresh, &portrait, &scene)?);
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}

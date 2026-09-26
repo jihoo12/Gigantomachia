@@ -73,7 +73,7 @@ cargo run --release --example water_board
 cargo run --example water_board -- --headless /tmp/water-board.png 1.25
 ```
 
-The example places a shallow rectangular surface on an elevated wooden board. Alternating slats remain visible through refraction; a raised wooden rim covers the water edges. Two colored markers make reflected silhouettes easy to identify. It starts with realistic shading, small waves, and foam disabled. The standard pause, camera, style, and effect controls apply. Navigation is unconstrained in this bounded-water example.
+The example places a shallow rectangular surface on an elevated wooden board. Alternating slats remain visible through refraction; a raised wooden rim covers the water edges except for a front outlet. A [falling-water effect](waterfall.md) drains visually into a puddle. Two colored markers make reflected silhouettes easy to identify. It starts with realistic shading, small waves, and foam disabled. The standard pause, camera, style, and effect controls apply. Navigation is unconstrained in this bounded-water example.
 
 ```rust
 use gigantomachia::water::{Water, WaterBounds};
@@ -91,7 +91,7 @@ let water = Water {
 
 `WaterBounds` specifies a fixed world-XZ center and positive half extents in meters. `None` retains the camera-following ocean. A bounded surface stretches the existing grid over its rectangle, disables horizontal Gerstner displacement, and omits the ocean-edge haze. Its vertical wave motion and normals remain consistent, and it keeps the existing refraction and shadow passes. Bounds validation rejects non-finite or non-positive dimensions.
 
-This is a horizontal surface, not a simulated volume. There are no transparent side faces, container collision, spilling, or fluid flow. The board rim is ordinary opaque geometry. Raising the wave amplitude too far can intersect the bottom or extend above the rim; the initial depth and amplitude avoid this. Only one water surface is supported per scene.
+This is a horizontal surface, not a simulated volume. There are no transparent side faces, container collision, or simulated fluid flow. An optional authored spill effect is available through `Water::waterfall`; it does not drain the surface. The board rim is ordinary opaque geometry. Raising the wave amplitude too far can intersect the bottom or extend above the rim; the initial depth and amplitude avoid this. Only one water surface is supported per scene.
 
 ## Render Passes and Color Space
 
@@ -150,6 +150,7 @@ There is no shoreline texture or island-specific branch. Any submerged mesh appr
 
 | Field | Default | Behavior |
 | --- | --- | --- |
+| `waterfall` | `None` | Optional visual sheet, puddle, foam, and splash effect |
 | `bounds` | `None` | Optional fixed rectangular surface in world XZ |
 | `style` | `WaterStyle::Stylized` | Selects the existing or realistic surface |
 | `ripple_strength` | `1.0` | Realistic short-wave slope multiplier, clamped to 0–2 |

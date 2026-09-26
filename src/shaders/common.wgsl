@@ -9,6 +9,8 @@ struct Uniforms {
     absorption: vec4<f32>,
     surface: vec4<f32>,
     water_bounds: vec4<f32>,
+    waterfall_origin: vec4<f32>,
+    waterfall_shape: vec4<f32>,
     reflection_view_projection: mat4x4<f32>,
     reflection: vec4<f32>,
 }
