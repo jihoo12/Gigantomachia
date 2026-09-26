@@ -70,7 +70,8 @@ fn corner(index: u32) -> vec2<f32> {
     let across = vec3<f32>(forward.z, 0.0, -forward.x);
     let drop = scene.waterfall_shape.z;
     let flight = sqrt(2.0 * drop / 9.81);
-    let landing = origin + forward * (1.3 * flight) - vec3<f32>(0.0, drop, 0.0);
+    let exit_speed = 0.72;
+    let landing = origin + forward * (exit_speed * flight) - vec3<f32>(0.0, drop, 0.0);
     let time = scene.camera_time.w;
 
     var out: SpillVertex;
@@ -104,35 +105,37 @@ fn corner(index: u32) -> vec2<f32> {
         let crest_u = min(uv.y / crest_end, 1.0);
         let fall_u = max((uv.y - crest_end) / (1.0 - crest_end), 0.0);
         let t = fall_u * flight;
-        let speed = 1.3 + 9.81 * t;
+        let speed = exit_speed + 9.81 * t;
 
         let macro_flow = fbm(vec2<f32>(uv.x * 3.1 + time * 0.12, uv.y * 1.7 - time * 0.19));
         let turbulent = fbm(vec2<f32>(uv.x * 12.0 - time * 0.31, uv.y * 5.0 + time * 0.42));
         let breakup = smoothstep(0.32, 0.98, uv.y) * turbulent;
         let edge = abs(uv.x * 2.0 - 1.0);
 
-        let local_width = width * mix(0.86, 1.08, macro_flow) * (1.0 - 0.10 * uv.y);
-        let wander = (macro_flow - 0.5) * width * 0.10 + (turbulent - 0.5) * width * 0.035 * uv.y;
+        // A small board spill contracts into a narrow coherent stream as gravity accelerates it.
+        let contraction = mix(1.0, 0.58, smoothstep(0.10, 0.92, uv.y));
+        let local_width = width * contraction * mix(0.94, 1.04, macro_flow);
+        let wander = (macro_flow - 0.5) * width * 0.045 + (turbulent - 0.5) * width * 0.018 * uv.y;
         let forward_noise = (turbulent - 0.5) * 0.055 * sin(uv.y * PI);
 
         let crest_forward = crest_u * crest_u * 0.22;
         let crest_drop = crest_u * crest_u * crest_u * 0.08;
         out.world = origin
             + across * ((uv.x - 0.5) * local_width + wander)
-            + forward * (crest_forward + 1.3 * t + forward_noise)
+            + forward * (crest_forward + exit_speed * t + forward_noise)
             - vec3<f32>(0.0, crest_drop + 0.5 * 9.81 * t * t, 0.0);
 
         // The geometric normal follows the ballistic sheet; fragment microstructure
         // adds the capillary-scale detail.
-        out.normal = normalize(forward * speed + vec3<f32>(0.0, 1.3, 0.0)
+        out.normal = normalize(forward * speed + vec3<f32>(0.0, exit_speed, 0.0)
             + across * ((turbulent - 0.5) * 0.55));
         out.uv = uv;
         out.aeration = clamp(
-            smoothstep(0.50, 0.98, uv.y) * (0.18 + 0.82 * breakup)
+            smoothstep(0.72, 1.0, uv.y) * (0.10 + 0.58 * breakup)
             + smoothstep(0.72, 1.0, edge) * 0.20,
             0.0, 1.0
         );
-        out.thickness = mix(0.20, 0.055, uv.y) * mix(0.72, 1.28, macro_flow);
+        out.thickness = mix(0.11, 0.045, uv.y) * mix(0.84, 1.16, macro_flow);
     // Secondary spray. Billboards are stretched along the ballistic velocity so they
     // read as droplets/ligaments instead of round game particles.
     } else {
@@ -252,9 +255,9 @@ fn corner(index: u32) -> vec2<f32> {
     let optical = 1.0 - exp(-in.thickness * 5.0);
     let edge = pow(abs(in.uv.x * 2.0 - 1.0), 9.0);
     let breakup_field = fbm(vec2<f32>(in.uv.x * 9.0 - time * 0.42, in.uv.y * 7.0 + time * 0.63));
-    let breakup_zone = smoothstep(0.48, 0.96, in.uv.y);
+    let breakup_zone = smoothstep(0.74, 0.99, in.uv.y);
     let edge_loss = smoothstep(0.55, 1.0, abs(in.uv.x * 2.0 - 1.0)) * breakup_zone;
-    let holes = mix(0.0, 0.64, breakup_zone) + edge_loss * 0.18;
+    let holes = mix(0.0, 0.34, breakup_zone) + edge_loss * 0.10;
     if breakup_zone > 0.03 && breakup_field < holes {
         discard;
     }
