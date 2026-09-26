@@ -321,7 +321,7 @@ impl Renderer {
                 &[],
                 Some(false),
             ),
-            waterfall: waterfall::WaterfallPass::new(gpu, &layout),
+            waterfall: waterfall::WaterfallPass::new(gpu, &layout, &water_layout),
             water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
