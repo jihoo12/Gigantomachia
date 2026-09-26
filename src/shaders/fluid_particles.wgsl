@@ -16,6 +16,7 @@ struct Aabb { min: vec4<f32>, max: vec4<f32> };
 @group(0) @binding(5) var<storage, read> colliders: array<Aabb>;
 @group(0) @binding(6) var<storage, read_write> grid_counts: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> grid_particles: array<u32>;
+@group(0) @binding(8) var<storage, read_write> density: array<f32>;
 
 const GRID_DIM = vec3<u32>(64u, 32u, 96u);
 const GRID_ORIGIN = vec3<f32>(-8.0, -1.0, -4.0);
@@ -38,6 +39,39 @@ fn insert_grid(@builtin(global_invocation_id) id: vec3<u32>) {
     let cell=grid_index(grid_cell(src[i].xyz));
     let slot=atomicAdd(&grid_counts[cell],1u);
     if slot<p.counts.w { grid_particles[cell*p.counts.w+slot]=i; }
+}
+
+fn in_grid(c: vec3<i32>) -> bool {
+    return all(c >= vec3<i32>(0)) && all(c < vec3<i32>(GRID_DIM));
+}
+
+@compute @workgroup_size(64)
+fn compute_density(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i=id.x; if i>=p.counts.y || src[i].w<0.5 { return; }
+    let xi=src[i].xyz;
+    let base=vec3<i32>(floor((xi-GRID_ORIGIN)/CELL_SIZE));
+    let h=CELL_SIZE;
+    var rho=0.0;
+    for(var dz=-1;dz<=1;dz++) {
+        for(var dy=-1;dy<=1;dy++) {
+            for(var dx=-1;dx<=1;dx++) {
+                let cell=base+vec3<i32>(dx,dy,dz);
+                if in_grid(cell) {
+                    let ci=grid_index(vec3<u32>(cell));
+                    let n=min(atomicLoad(&grid_counts[ci]),p.counts.w);
+                    for(var slot=0u;slot<n;slot++) {
+                        let j=grid_particles[ci*p.counts.w+slot];
+                        let q=length(xi-src[j].xyz)/h;
+                        if q<1.0 {
+                            let w=1.0-q;
+                            rho+=w*w*w;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    density[i]=rho;
 }
 
 @compute @workgroup_size(64)
