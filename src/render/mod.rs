@@ -457,7 +457,7 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("scene-frame"),
             });
-        self.particle_fluid.update(gpu, &mut encoder);
+        self.particle_fluid.update(gpu, &mut encoder, scene.fluid.as_ref());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sun-shadow-pass"),
