@@ -80,128 +80,55 @@ fn corner(index: u32) -> vec2<f32> {
 @vertex fn vs_main(@builtin(vertex_index) index: u32) -> SpillVertex {
     let origin = scene.waterfall_origin.xyz;
     let width = scene.waterfall_origin.w;
-    let forward = vec3<f32>(scene.waterfall_shape.x, 0.0, scene.waterfall_shape.y);
+    let forward = normalize(vec3<f32>(scene.waterfall_shape.x, 0.0, scene.waterfall_shape.y));
     let across = vec3<f32>(forward.z, 0.0, -forward.x);
-    let drop = scene.waterfall_shape.z;
-    let flight = sqrt(2.0 * drop / 9.81);
-    let exit_speed = 0.72;
-    let landing = origin + forward * (exit_speed * flight) - vec3<f32>(0.0, drop, 0.0);
+    let drop = max(scene.waterfall_shape.z, 0.05);
     let time = scene.camera_time.w;
 
+    // 64 independent source cells across the physical lip, 16 ballistic segments each.
+    let quad = index / 6u;
+    let lip_cell = quad % 64u;
+    let segment = quad / 64u;
+    let c = corner(index % 6u);
+    let lateral_u = (f32(lip_cell) + c.x) / 64.0;
+    let path_u = (f32(segment) + c.y) / 16.0;
+
+    // Sample the UPPER fluid domain at the physical lip. The renderer binds the upper
+    // state here, so geometry is created from simulation state rather than a sheet mask.
+    let source_world = origin.xz + across.xz * ((lateral_u - 0.5) * width);
+    let fluid = spill_flow_sample(source_world);
+    let outward = max(dot(fluid.yz, forward.xz), 0.0);
+    let depth = max(0.055 + fluid.x, 0.0);
+    let flux = depth * outward;
+
+    // A shallow-water cell at rest still spills under gravity at an open lip.
+    let gravity_exit = sqrt(2.0 * 9.81 * max(depth, 0.001));
+    let exit_speed = max(outward, gravity_exit * 0.34);
+    let flight = sqrt(2.0 * drop / 9.81);
+    let t = path_u * flight;
+    let lateral_velocity = dot(fluid.yz, across.xz);
+
+    // Continuity: accelerating water occupies a smaller cross-section as it falls.
+    let vertical_speed = 9.81 * t;
+    let speed_ratio = sqrt(max(exit_speed, 0.05) / max(sqrt(exit_speed * exit_speed + vertical_speed * vertical_speed), 0.05));
+    let contracted = (lateral_u - 0.5) * width * mix(1.0, speed_ratio, path_u);
+    let jitter = (fbm(vec2<f32>(f32(lip_cell) * 0.31, time * 0.17 + path_u * 2.0)) - 0.5)
+        * width * 0.008 * path_u;
+
     var out: SpillVertex;
-    out.fade = 1.0;
-    out.aeration = 0.0;
-    out.thickness = 0.15;
-    out.normal = vec3<f32>(0.0, 1.0, 0.0);
-
-    // Receiving-water disturbance. Kept subtle: the impact whitewater, not a visible
-    // geometric disk, should describe the landing point.
-    if index < 288u {
-        out.kind = 0u;
-        let slice = index / 3u;
-        let vertex = index % 3u;
-        let angle = (f32(slice) + select(0.0, 1.0, vertex == 2u)) * (2.0 * PI / 96.0);
-        let radius = select(1.0, 0.0, vertex == 0u);
-        out.uv = vec2<f32>(cos(angle), sin(angle)) * radius;
-        let irregular = 0.94 + 0.06 * fbm(vec2<f32>(angle * 2.7, time * 0.18));
-        out.world = landing
-            + (across * out.uv.x * (width * 0.5 + 0.65) + forward * out.uv.y * 0.92) * irregular;
-        out.aeration = (1.0 - smoothstep(0.05, 0.75, length(out.uv))) * 0.75;
-        out.thickness = 0.08;
-    // Small board runoff.  Instead of one continuous curtain, lateral discharge
-    // bands form several neighbouring rivulets. Their centres drift independently and
-    // their widths vary with time, so the lip remains wet without looking funnelled.
-    } else if index < 6432u {
-        out.kind = 1u;
-        let i = index - 288u;
-        let cell = i / 6u;
-        let uv = (vec2<f32>(f32(cell % 32u), f32(cell / 32u)) + corner(i % 6u)) / 32.0;
-        let crest_end = 0.20;
-        let crest_u = min(uv.y / crest_end, 1.0);
-        let fall_u = max((uv.y - crest_end) / (1.0 - crest_end), 0.0);
-        let t = fall_u * flight;
-        let speed = exit_speed + 9.81 * t;
-
-        // Read the fluid state along the ballistic landing footprint.  Height and
-        // horizontal speed become the local boundary flux; neighbouring cells therefore
-        // merge/split the falling surface naturally instead of four authored rivulets.
-        let x = uv.x;
-        let sample_world = landing.xz + across.xz * ((x - 0.5) * width);
-        let fluid = spill_flow_sample(sample_world);
-        let flow_speed = length(fluid.yz);
-        let flux = clamp(0.22 + fluid.x * 9.0 + flow_speed * 1.8, 0.04, 1.0);
-        let local_noise = fbm(vec2<f32>(x * 7.0 + time * 0.10, uv.y * 2.4 - time * 0.16));
-        let turbulent = fbm(vec2<f32>(x * 15.0 - time * 0.29, uv.y * 6.0 + time * 0.38));
-
-        // Lateral velocity in the shared domain bends the stream.  Contraction comes
-        // from falling acceleration (mass continuity), not hand-authored band centres.
-        let lateral_velocity = dot(vec2<f32>(fluid.y, fluid.z), across.xz);
-        let contraction = mix(1.0, 0.72, smoothstep(0.22, 1.0, uv.y));
-        let contracted_x = 0.5 + (x - 0.5) * contraction;
-        let lateral = (contracted_x - 0.5) * width
-            + lateral_velocity * t * 0.24
-            + (local_noise - 0.5) * width * 0.018 * smoothstep(0.18, 0.85, uv.y);
-        let forward_noise = (turbulent - 0.5) * 0.028 * sin(uv.y * PI);
-        let crest_forward = crest_u * crest_u * 0.20;
-        let crest_drop = crest_u * crest_u * crest_u * 0.07;
-
-        out.world = origin
-            + across * lateral
-            + forward * (crest_forward + exit_speed * t + forward_noise)
-            - vec3<f32>(0.0, crest_drop + 0.5 * 9.81 * t * t, 0.0);
-        out.normal = normalize(forward * speed + vec3<f32>(0.0, exit_speed, 0.0)
-            + across * ((turbulent - 0.5) * 0.34));
-        out.uv = uv;
-        // Flux controls continuity and thickness. Low-flux cells become narrow/thin,
-        // while high-flux neighbours visually join into one free surface.
-        out.aeration = flux;
-        out.thickness = mix(0.072, 0.034, uv.y)
-            * mix(0.82, 1.14, local_noise)
-            * mix(0.38, 1.0, flux);
-    // Secondary spray. Billboards are stretched along the ballistic velocity so they
-    // read as droplets/ligaments instead of round game particles.
-    } else {
-        out.kind = 2u;
-        let i = index - 6432u;
-        let id = f32(i / 6u);
-        let age = fract(time * (1.05 + random(id + 5.0) * 0.55) + random(id));
-        let t = age * (0.34 + random(id + 23.0) * 0.22);
-        let angle = random(id + 17.0) * 2.0 * PI;
-        let horizontal = across * cos(angle) + forward * sin(angle);
-        let launch = 1.25 + random(id + 8.0) * 1.55;
-        let vertical = 1.15 + random(id + 11.0) * 1.85;
-        let center = landing
-            + across * ((random(id + 3.0) - 0.5) * width * 0.95)
-            + horizontal * t * launch
-            + vec3<f32>(0.0, vertical * t - 4.905 * t * t, 0.0);
-
-        let velocity = horizontal * launch + vec3<f32>(0.0, vertical - 9.81 * t, 0.0);
-        let view = normalize(scene.camera_time.xyz - center);
-        let screen_right = normalize(cross(vec3<f32>(0.0, 1.0, 0.001), view));
-        let screen_up = normalize(cross(view, screen_right));
-        let projected_velocity = velocity - view * dot(velocity, view);
-        let tangent = select(screen_up, normalize(projected_velocity), length(projected_velocity) > 0.05);
-        let side = normalize(cross(view, tangent));
-        let uv = corner(i % 6u) * 2.0 - vec2<f32>(1.0);
-
-        let class_seed = random(id + 41.0);
-        let ligament = 1.0 - step(0.16, class_seed);
-        let mist = step(0.90, class_seed);
-        let droplet = 1.0 - max(ligament, mist);
-
-        let base_radius = mix(0.006, 0.018, random(id + 1.0));
-        let radius = base_radius * (droplet + ligament * 0.72 + mist * 2.8);
-        let stretch = droplet * mix(1.15, 2.2, random(id + 19.0))
-            + ligament * mix(3.0, 6.0, random(id + 29.0))
-            + mist * mix(0.65, 1.25, random(id + 37.0));
-        out.world = center + side * uv.x * radius + tangent * uv.y * radius * stretch;
-        out.normal = view;
-        out.uv = uv;
-        out.fade = sin(age * PI) * mix(1.0, 0.42, mist);
-        out.aeration = droplet * 0.42 + ligament * 0.28 + mist * 0.88;
-        out.thickness = radius * mix(2.0, 0.45, mist);
-    }
-
+    out.kind = 1u;
+    out.world = origin
+        + across * (contracted + lateral_velocity * t + jitter)
+        + forward * (exit_speed * t)
+        - vec3<f32>(0.0, 0.5 * 9.81 * t * t, 0.0);
+    let tangent = forward * exit_speed + across * lateral_velocity - vec3<f32>(0.0, 9.81 * t, 0.0);
+    out.normal = normalize(cross(across, tangent));
+    out.uv = vec2<f32>(lateral_u, path_u);
+    // Coverage is now a direct consequence of source-cell flux. A tiny floor represents
+    // gravity-driven overflow while the newly-created upper domain settles.
+    out.aeration = clamp(max(flux * 32.0, depth * 2.8), 0.0, 1.0);
+    out.thickness = max(depth * speed_ratio, 0.004);
+    out.fade = smoothstep(0.006, 0.030, depth) * smoothstep(0.0, 0.018, max(flux, depth * 0.012));
     out.clip = scene.view_projection * vec4<f32>(out.world, 1.0);
     return out;
 }
@@ -210,40 +137,6 @@ fn corner(index: u32) -> vec2<f32> {
     let time = scene.camera_time.w;
     let view = normalize(scene.camera_time.xyz - in.world);
     let visibility = shadow_visibility(in.world, in.normal);
-
-    if in.kind == 2u {
-        let r = length(in.uv);
-        let coverage = 1.0 - smoothstep(0.42, 1.0, r);
-        let fresnel = 0.02037 + 0.97963 * pow(1.0 - max(dot(in.normal, view), 0.0), 5.0);
-        let reflected = sky_lighting(reflect(-view, in.normal), visibility);
-        let refracted = refracted_scene(in.clip, in.normal, in.thickness);
-        let clear_water = mix(refracted, reflected, fresnel);
-        let whitewater = vec3<f32>(0.88, 0.92, 0.91) * (0.58 + 0.42 * visibility);
-        let color = mix(clear_water, whitewater, in.aeration * 0.72);
-        let opacity = coverage * in.fade * mix(0.16, 0.42, in.aeration);
-        return vec4<f32>(color, opacity);
-    }
-
-    if in.kind == 0u {
-        let radius = length(in.uv);
-        let edge = 1.0 - smoothstep(0.76, 1.0, radius);
-        let n1 = fbm(in.uv * 8.0 + vec2<f32>(time * 0.35, -time * 0.28));
-        let n2 = fbm(in.uv.yx * 15.0 + vec2<f32>(-time * 0.51, time * 0.23));
-        let radial = normalize(vec3<f32>(in.uv.x, 0.001, in.uv.y));
-        let normal = normalize(vec3<f32>(
-            radial.x * (n1 - 0.5) * 0.18,
-            1.0,
-            radial.z * (n2 - 0.5) * 0.18
-        ));
-        let fresnel = 0.02037 + 0.97963 * pow(1.0 - max(dot(normal, view), 0.0), 5.0);
-        let reflected = sky_lighting(reflect(-view, normal), visibility);
-        let water = mix(vec3<f32>(0.025, 0.055, 0.060), reflected, fresnel);
-        let impact = exp(-radius * radius * 7.5);
-        let foam_noise = smoothstep(0.42, 0.67, n1 * 0.62 + n2 * 0.38);
-        let foam = impact * mix(0.35, 1.0, foam_noise) * 0.92;
-        let color = mix(water, vec3<f32>(0.84, 0.90, 0.89) * (0.55 + 0.45 * visibility), foam);
-        return vec4<f32>(color, edge * (0.035 + foam * 0.58));
-    }
 
     // Multi-scale capillary perturbation. Unlike the old periodic vertical sine streaks,
     // these layers have no single visible repetition direction.
