@@ -1,6 +1,7 @@
 //! Reusable forward renderer. Owns frame resources, draw order, and GPU mesh caching.
 
 mod flow;
+mod fluid_particles;
 mod gpu;
 mod mesh;
 mod offscreen;
@@ -47,6 +48,7 @@ pub struct Renderer {
     water: WaterPass,
     waterfall: waterfall::WaterfallPass,
     flow: flow::FluidSimulation,
+    particle_fluid: fluid_particles::ParticleFluid,
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -329,6 +331,7 @@ impl Renderer {
             waterfall: waterfall::WaterfallPass::new(gpu, &layout, &water_layout, &flow_layout),
             water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout, &flow_layout),
             flow: flow::FluidSimulation::new(gpu, &flow_layout),
+            particle_fluid: fluid_particles::ParticleFluid::new(gpu),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
                 gpu,
@@ -470,6 +473,7 @@ impl Renderer {
                 label: Some("scene-frame"),
             });
         self.flow.update(gpu, &mut encoder, scene);
+        self.particle_fluid.update(gpu, &mut encoder);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sun-shadow-pass"),
