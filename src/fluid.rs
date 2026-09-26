@@ -4,7 +4,7 @@
 //! colliders; a falling stream is therefore an outcome of gravity and geometry, not an object.
 
 use crate::render::EngineResult;
-use glam::Vec3;
+use glam::{Quat, Vec3};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Aabb {
@@ -23,14 +23,27 @@ impl Aabb {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct OrientedBox {
+    pub center: Vec3,
+    pub half_extent: Vec3,
+    pub rotation: Quat,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum FluidCollider {
-    Box(Aabb),
+    Box(OrientedBox),
 }
 impl FluidCollider {
     pub fn cuboid(center: Vec3, half_extent: Vec3) -> EngineResult<Self> {
-        Ok(Self::Box(Aabb::new(center, half_extent)?))
+        Self::oriented_cuboid(center, half_extent, Quat::IDENTITY)
     }
-    pub fn bounds(self) -> Aabb { match self { Self::Box(bounds) => bounds } }
+    pub fn oriented_cuboid(center: Vec3, half_extent: Vec3, rotation: Quat) -> EngineResult<Self> {
+        Aabb::new(center, half_extent)?;
+        if !rotation.is_finite() || rotation.length_squared() <= f32::EPSILON {
+            return Err("fluid oriented box requires a finite nonzero rotation".into());
+        }
+        Ok(Self::Box(OrientedBox { center, half_extent, rotation: rotation.normalize() }))
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
