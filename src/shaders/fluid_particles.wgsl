@@ -1,57 +1,44 @@
 // First 3D fluid-world milestone: particles are the simulation state.
 // This deliberately does not know about waterfalls, upper/lower water, or ribbons.
 struct Params {
-    dt_gravity: vec4<f32>,      // dt, gravity, particle radius, restitution
-    emitter: vec4<f32>,         // xyz position, spawn rate
-    emitter_dir: vec4<f32>,     // xyz initial velocity, active particle count
-    board: vec4<f32>,           // center x, top y, center z, half x
-    board2: vec4<f32>,          // half z, lower top y, lower center z, lower half x
-    lower: vec4<f32>,           // lower half z, damping, time, reserved
+    dt_gravity: vec4<f32>,
+    emitter_min: vec4<f32>,
+    emitter_max: vec4<f32>,
+    emitter_velocity: vec4<f32>,
+    counts: vec4<u32>,
 };
+struct Aabb { min: vec4<f32>, max: vec4<f32> };
 @group(0) @binding(0) var<storage, read> src: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read_write> dst: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> vel_src: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> vel_dst: array<vec4<f32>>;
 @group(0) @binding(4) var<uniform> p: Params;
-
-fn collide_plane(pos0: vec3<f32>, vel0: vec3<f32>, top: f32, cx: f32, cz: f32, hx: f32, hz: f32) -> vec4<f32> {
-    var pos=pos0; var vel=vel0;
-    let inside=abs(pos.x-cx)<hx && abs(pos.z-cz)<hz;
-    if inside && pos.y < top+p.dt_gravity.z && pos.y > top-0.20 && vel.y<0.0 {
-        pos.y=top+p.dt_gravity.z;
-        vel.y=-vel.y*p.dt_gravity.w;
-        vel.x *= p.lower.y; vel.z *= p.lower.y;
-    }
-    return vec4<f32>(pos,0.0)+vec4<f32>(vel,0.0)*0.0;
-}
+@group(0) @binding(5) var<storage, read> colliders: array<Aabb>;
 
 @compute @workgroup_size(64)
 fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let i=id.x; let count=u32(p.emitter_dir.w);
-    if i>=count { return; }
-    let dt=p.dt_gravity.x;
-    var pos=src[i].xyz;
-    var vel=vel_src[i].xyz;
-    vel.y-=p.dt_gravity.y*dt;
-    pos+=vel*dt;
-
-    // The same collision rule handles both boards. If a particle crosses an edge,
-    // there is simply no supporting plane and gravity keeps acting.
-    let upper_inside=abs(pos.x-p.board.x)<p.board.w && abs(pos.z-p.board.z)<p.board2.x;
-    if upper_inside && pos.y<p.board.y+p.dt_gravity.z && pos.y>p.board.y-0.20 && vel.y<0.0 {
-        pos.y=p.board.y+p.dt_gravity.z; vel.y=-vel.y*p.dt_gravity.w; vel.x *= p.lower.y; vel.z *= p.lower.y;
+    let i=id.x; if i>=p.counts.y { return; }
+    let fx=f32(i%32u)/31.0; let fy=f32((i/32u)%8u)/7.0; let fz=f32((i/256u)%16u)/15.0;
+    let spawn=mix(p.emitter_min.xyz,p.emitter_max.xyz,vec3<f32>(fx,fy,fz));
+    var pos=src[i].xyz; var vel=vel_src[i].xyz;
+    if src[i].w<0.5 { pos=spawn; vel=p.emitter_velocity.xyz; }
+    vel.y-=p.dt_gravity.y*p.dt_gravity.x; pos+=vel*p.dt_gravity.x;
+    let r=p.dt_gravity.z;
+    for(var c=0u;c<p.counts.x;c++) {
+        let lo=colliders[c].min.xyz-vec3<f32>(r); let hi=colliders[c].max.xyz+vec3<f32>(r);
+        if all(pos>lo) && all(pos<hi) {
+            let a=pos-lo; let b=hi-pos; var axis=0u; var side=-1.0; var depth=a.x;
+            if b.x<depth { depth=b.x; side=1.0; }
+            if a.y<depth { depth=a.y; axis=1u; side=-1.0; }
+            if b.y<depth { depth=b.y; axis=1u; side=1.0; }
+            if a.z<depth { depth=a.z; axis=2u; side=-1.0; }
+            if b.z<depth { axis=2u; side=1.0; }
+            var n=vec3<f32>(0.0); n[axis]=side;
+            if side<0.0 { pos[axis]=lo[axis]; } else { pos[axis]=hi[axis]; }
+            let vn=dot(vel,n); if vn<0.0 { vel-=n*vn*(1.0+p.dt_gravity.w); }
+            let normal=n*dot(vel,n); vel=normal+(vel-normal)*0.86;
+        }
     }
-    let lower_inside=abs(pos.x)<p.board2.w && abs(pos.z-p.board2.z)<p.lower.x;
-    if lower_inside && pos.y<p.board2.y+p.dt_gravity.z && pos.y>p.board2.y-0.20 && vel.y<0.0 {
-        pos.y=p.board2.y+p.dt_gravity.z; vel.y=-vel.y*p.dt_gravity.w; vel.x *= p.lower.y; vel.z *= p.lower.y;
-    }
-
-    // Recycle particles that have left the demonstration volume back to the source.
-    if pos.y < -0.5 || abs(pos.x)>12.0 || abs(pos.z)>14.0 {
-        let col=f32(i%32u); let row=f32((i/32u)%16u);
-        pos=p.emitter.xyz+vec3<f32>((col-15.5)*0.025, f32((i/512u)%8u)*0.025, (row-7.5)*0.025);
-        vel=p.emitter_dir.xyz;
-    }
-    dst[i]=vec4<f32>(pos,1.0);
-    vel_dst[i]=vec4<f32>(vel,0.0);
+    if pos.y < -0.5 || abs(pos.x)>12.0 || abs(pos.z)>14.0 { pos=spawn; vel=p.emitter_velocity.xyz; }
+    dst[i]=vec4<f32>(pos,1.0); vel_dst[i]=vec4<f32>(vel,0.0);
 }
