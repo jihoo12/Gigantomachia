@@ -1,5 +1,5 @@
 const W:u32=64u; const H:u32=128u;
-struct Params{bounds:vec4<f32>,source:vec4<f32>,direction:vec4<f32>};
+struct Params{bounds:vec4<f32>,source:vec4<f32>,direction:vec4<f32>,upper:vec4<f32>,outlet:vec4<f32>};
 @group(0) @binding(0) var<storage,read> src:array<vec4<f32>>;
 @group(0) @binding(1) var<storage,read_write> dst:array<vec4<f32>>;
 @group(0) @binding(2) var<uniform> p:Params;
@@ -24,10 +24,20 @@ fn state(x:i32,y:i32)->vec4<f32>{return src[idx(u32(clamp(x,0,i32(W)-1)),u32(cla
  let world=p.bounds.xy+(uv*2.0-1.0)*p.bounds.zw;
  let rel=world-p.source.xy;
  let injection=exp(-dot(rel,rel)/max(p.source.z*p.source.z,0.01));
+ // Boundary flux arriving from the upper domain.  Until the upper domain gets its
+ // own grid, depth is the physical nominal depth and velocity is gravity-driven
+ // toward the lip; unlike the old pulse this transfers persistent mass + momentum.
+ let lip_rel=world-p.source.xy;
+ let incoming_flux=max(p.outlet.w,0.0)*sqrt(2.0*9.81*max(p.outlet.w,0.001));
+ let transfer=injection*incoming_flux;
  // Inject momentum, not water volume.  A tiny zero-mean pulse excites ripples
  // without steadily raising the simulated surface.
- vel+=p.direction.xy*injection*0.62*dt;
- h+=injection*sin(p.direction.w*7.3)*0.010*dt;
+ vel+=p.direction.xy*transfer*5.5*dt;
+ h+=transfer*0.16*dt;
+ // Drain the same transferred volume over a wider wake so the finite lower domain
+ // does not accumulate water indefinitely.
+ let wake=exp(-dot(lip_rel-p.direction.xy*0.55,lip_rel-p.direction.xy*0.55)/max(p.source.z*p.source.z*3.5,0.04));
+ h-=wake*transfer*0.11*dt;
 
  let back=world-vel*dt;
  let buv=(back-(p.bounds.xy-p.bounds.zw))/(p.bounds.zw*2.0);
