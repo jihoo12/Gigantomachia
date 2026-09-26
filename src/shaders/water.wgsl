@@ -26,7 +26,7 @@ struct WaterVertex {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) wave_point: vec2<f32>,
-    @location(3) surface_data: vec2<f32>, // amplitude, 1 for secondary
+    @location(3) surface_data: vec3<f32>, // amplitude, 1 for secondary, level
 }
 
 @vertex fn vs_main(@location(0) grid: vec2<f32>, @builtin(instance_index) instance: u32) -> WaterVertex {
@@ -88,7 +88,7 @@ struct WaterVertex {
     var out: WaterVertex;
     out.world = world;
     out.wave_point = point;
-    out.surface_data = vec2<f32>(amplitude_scale, select(0.0, 1.0, secondary));
+    out.surface_data = vec3<f32>(amplitude_scale, select(0.0, 1.0, secondary), level);
     out.normal = normalize(cross(tz, tx));
     out.clip = scene.view_projection * vec4<f32>(world, 1.0);
     return out;
@@ -193,7 +193,10 @@ fn sun_glint(normal: vec3<f32>, view: vec3<f32>, alpha: f32) -> vec3<f32> {
 
 // Alpha is coverage of reflected opaque geometry; clear pixels retain the procedural sky.
 fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> vec3<f32> {
-    if scene.reflection.x < 0.5 { return fallback; }
+    // The current reflection target is rendered for the primary plane only.
+    if scene.reflection.x < 0.5 || (scene.secondary_water.z > 0.5 && abs(world.y - scene.secondary_water.y) < 0.45) {
+        return fallback;
+    }
     let plane_point = vec3<f32>(world.x, scene.water.w, world.z);
     let warped = plane_point + vec3<f32>(normal.x, 0.0, normal.z) * 0.25;
     let clip = scene.reflection_view_projection * vec4<f32>(warped, 1.0);
@@ -270,7 +273,7 @@ fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> 
     let light = scene.sun.xyz;
     let half_vector = normalize(light + view);
     let specular = pow(max(dot(normal, half_vector), 0.0), 220.0);
-    let crest = smoothstep(-0.8, 1.3, in.world.y - scene.water.w);
+    let crest = smoothstep(-0.8, 1.3, in.world.y - in.surface_data.z);
     let deep = vec3<f32>(0.006, 0.075, 0.105);
     let teal = vec3<f32>(0.015, 0.20, 0.19);
     var scatter = mix(deep, teal, crest * 0.45) * (0.65 + 0.35 * max(dot(normal, light), 0.0) * visibility);
