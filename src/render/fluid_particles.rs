@@ -40,6 +40,8 @@ pub(super) struct ParticleFluid {
     clear_pipeline: wgpu::ComputePipeline,
     insert_pipeline: wgpu::ComputePipeline,
     density_pipeline: wgpu::ComputePipeline,
+    clear_emit_pipeline: wgpu::ComputePipeline,
+    emit_pipeline: wgpu::ComputePipeline,
     density: wgpu::Buffer,
     emit_accumulator: f32,
 }
@@ -77,10 +79,12 @@ impl ParticleFluid {
         let clear_pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("fluid-grid-clear"),layout:Some(&pl),module:&shader,entry_point:Some("clear_grid"),compilation_options:Default::default(),cache:None});
         let insert_pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("fluid-grid-insert"),layout:Some(&pl),module:&shader,entry_point:Some("insert_grid"),compilation_options:Default::default(),cache:None});
         let density_pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("fluid-density"),layout:Some(&pl),module:&shader,entry_point:Some("compute_density"),compilation_options:Default::default(),cache:None});
+        let clear_emit_pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("fluid-emitter-counter-clear"),layout:Some(&pl),module:&shader,entry_point:Some("clear_emit_counter"),compilation_options:Default::default(),cache:None});
+        let emit_pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("fluid-emitter"),layout:Some(&pl),module:&shader,entry_point:Some("emit_inactive"),compilation_options:Default::default(),cache:None});
         let render_shader=gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("fluid-particle-render"),source:wgpu::ShaderSource::Wgsl(format!("{}\n{}",include_str!("../shaders/common.wgsl"),include_str!("../shaders/fluid_particles_render.wgsl")).into())});
         let rpl=gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:Some("fluid-particle-render-pipeline-layout"),bind_group_layouts:&[scene_layout,&render_layout],push_constant_ranges:&[]});
         let render_pipeline=gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{label:Some("fluid-particle-debug-render"),layout:Some(&rpl),vertex:wgpu::VertexState{module:&render_shader,entry_point:Some("vs_main"),buffers:&[],compilation_options:Default::default()},fragment:Some(wgpu::FragmentState{module:&render_shader,entry_point:Some("fs_main"),targets:&[Some(wgpu::ColorTargetState{format:super::targets::HDR_FORMAT,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})],compilation_options:Default::default()}),primitive:wgpu::PrimitiveState{cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState{format:super::DEPTH_FORMAT,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None});
-        Self{pipeline,render_pipeline,groups,render_groups,current:0,params,colliders,grid_counts,grid_particles,clear_pipeline,insert_pipeline,density_pipeline,density,emit_accumulator:0.0}
+        Self{pipeline,render_pipeline,groups,render_groups,current:0,params,colliders,grid_counts,grid_particles,clear_pipeline,insert_pipeline,density_pipeline,clear_emit_pipeline,emit_pipeline,density,emit_accumulator:0.0}
     }
 
     pub fn update(&mut self,gpu:&Gpu,encoder:&mut wgpu::CommandEncoder,world:Option<&FluidWorld>){
@@ -111,7 +115,11 @@ impl ParticleFluid {
         pass.set_pipeline(&self.clear_pipeline);pass.dispatch_workgroups(GRID_CELLS.div_ceil(64),1,1);
         pass.set_pipeline(&self.insert_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
         pass.set_pipeline(&self.density_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
-        pass.set_pipeline(&self.pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);drop(pass);
+        pass.set_pipeline(&self.pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
+        // The spatial grid is no longer needed after simulation, so reuse one atomic
+        // counter to allocate the requested emission budget from arbitrary inactive slots.
+        pass.set_pipeline(&self.clear_emit_pipeline);pass.dispatch_workgroups(1,1,1);
+        pass.set_pipeline(&self.emit_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);drop(pass);
         self.current^=1;
     }
     pub fn encode<'a>(&'a self,pass:&mut wgpu::RenderPass<'a>){
