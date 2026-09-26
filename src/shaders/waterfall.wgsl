@@ -94,7 +94,7 @@ fn corner(index: u32) -> vec2<f32> {
         let edge = abs(uv.x * 2.0 - 1.0);
 
         let local_width = width * mix(0.86, 1.08, macro_flow) * (1.0 - 0.10 * uv.y);
-        let wander = (macro - 0.5) * width * 0.10 + (turbulent - 0.5) * width * 0.035 * uv.y;
+        let wander = (macro_flow - 0.5) * width * 0.10 + (turbulent - 0.5) * width * 0.035 * uv.y;
         let forward_noise = (turbulent - 0.5) * 0.055 * sin(uv.y * PI);
 
         out.world = origin
