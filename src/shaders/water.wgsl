@@ -204,18 +204,43 @@ fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> 
         let channel2 = 1.0 - smoothstep(half_width2 * 0.8, half_width2 * 1.5, abs(lateral2));
         let approach2 = smoothstep(-2.8, -0.10, along2) * (1.0 - smoothstep(-0.10, 0.65, along2));
         let flow_strength = channel2 * approach2;
-        let streak = sin(lateral2 * 18.0 + along2 * 2.0 - scene.camera_time.w * 7.0);
+        let tf = scene.camera_time.w;
+        let coarse = noise(vec2<f32>(lateral2 * 3.4 + tf * 0.19, along2 * 2.2 - tf * 0.31)) - 0.5;
+        let medium = noise(vec2<f32>(lateral2 * 10.7 - tf * 0.41, along2 * 6.3 + tf * 0.67)) - 0.5;
+        let fine = noise(vec2<f32>(lateral2 * 27.0 + tf * 0.83, along2 * 15.0 - tf * 1.07)) - 0.5;
+        let cross_slope = coarse * 0.55 + medium * 0.32 + fine * 0.13;
+        let along_slope = medium * 0.22 + fine * 0.10;
         normal = normalize(normal - vec3<f32>(
-            flow2.x * flow_strength * 0.16 + across2.x * streak * flow_strength * 0.055,
+            flow2.x * flow_strength * (0.070 + along_slope)
+                + across2.x * cross_slope * flow_strength * 0.15,
             0.0,
-            flow2.y * flow_strength * 0.16 + across2.y * streak * flow_strength * 0.055
+            flow2.y * flow_strength * (0.070 + along_slope)
+                + across2.y * cross_slope * flow_strength * 0.15
         ));
     }
     // Unresolved normal variance broadens highlights rather than producing subpixel sparkles.
     let normal_dx = dpdx(normal);
     let normal_dy = dpdy(normal);
     let variance = min(0.04, 0.5 * (dot(normal_dx, normal_dx) + dot(normal_dy, normal_dy)));
-    let alpha = sqrt(pow(scene.surface.z, 4.0) + variance);
+    var alpha = sqrt(pow(scene.surface.z, 4.0) + variance);
+    // The outlet contains unresolved turbulent slopes. Feed that variance into GGX
+    // instead of letting a single broad mirror lobe paint a white stripe over the surface.
+    if scene.waterfall_origin.w > 0.0 {
+        let spill_r = scene.waterfall_origin.xyz;
+        let flow_r = normalize(vec2<f32>(scene.waterfall_shape.x, scene.waterfall_shape.y));
+        let across_r = vec2<f32>(flow_r.y, -flow_r.x);
+        let rel_r = in.world.xz - spill_r.xz;
+        let along_r = dot(rel_r, flow_r);
+        let lateral_r = dot(rel_r, across_r);
+        let channel_r = 1.0 - smoothstep(
+            scene.waterfall_origin.w * 0.38,
+            scene.waterfall_origin.w * 0.82,
+            abs(lateral_r)
+        );
+        let approach_r = smoothstep(-2.8, -0.15, along_r) * (1.0 - smoothstep(-0.15, 0.55, along_r));
+        let turbulent_roughness = channel_r * approach_r;
+        alpha = clamp(alpha + turbulent_roughness * 0.085, 0.025, 0.22);
+    }
     let facing = max(dot(normal, view), 0.0);
     let fresnel = 0.02037 + (1.0 - 0.02037) * pow(1.0 - facing, 5.0);
     let visibility = shadow_visibility(in.world, normal);
