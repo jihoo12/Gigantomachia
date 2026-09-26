@@ -1,5 +1,5 @@
 const W:u32=64u; const H:u32=128u;
-struct Params{bounds:vec4<f32>,source:vec4<f32>,direction:vec4<f32>,upper:vec4<f32>,outlet:vec4<f32>};
+struct Params{bounds:vec4<f32>,source:vec4<f32>,direction:vec4<f32>,upper:vec4<f32>,outlet:vec4<f32>,inflow:vec4<f32>};
 @group(0) @binding(0) var<storage,read> src:array<vec4<f32>>;
 @group(0) @binding(1) var<storage,read_write> dst:array<vec4<f32>>;
 @group(0) @binding(2) var<uniform> p:Params;
@@ -32,12 +32,22 @@ fn state(x:i32,y:i32)->vec4<f32>{return src[idx(u32(clamp(x,0,i32(W)-1)),u32(cla
  let nominal_depth=abs(p.outlet.w);
  let incoming_flux=nominal_depth*sqrt(2.0*9.81*max(nominal_depth,0.001));
  let transfer=injection*incoming_flux;
+ // A producer domain has a real mass source on the side opposite the outlet.
+ // This establishes a persistent source -> transport -> open-boundary flow instead
+ // of draining an initially flat visual surface.
+ let feed_rel=world-p.inflow.xy;
+ let feed=exp(-dot(feed_rel,feed_rel)/max(p.inflow.z*p.inflow.z,0.01))*producer;
+ let feed_rate=feed*max(p.inflow.w,0.0);
  // Inject momentum, not water volume.  A tiny zero-mean pulse excites ripples
  // without steadily raising the simulated surface.
  // Producer (upper) domain accelerates toward the open lip and loses height.
  // Receiver domain gains the same directed momentum and surface volume.
  vel+=p.direction.xy*transfer*mix(5.5,3.4,producer)*dt;
  h+=transfer*mix(0.16,-0.13,producer)*dt;
+ h+=feed_rate*dt;
+ // Give newly supplied mass a gentle downstream momentum. Pressure gradients then
+ // transport it across the board; this is intentionally weaker than the lip acceleration.
+ vel+=p.direction.xy*feed_rate*1.8*dt;
  // Drain the same transferred volume over a wider wake so the finite lower domain
  // does not accumulate water indefinitely.
  let wake=exp(-dot(lip_rel-p.direction.xy*0.55,lip_rel-p.direction.xy*0.55)/max(p.source.z*p.source.z*3.5,0.04));
