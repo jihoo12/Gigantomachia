@@ -5,10 +5,10 @@ struct WaveSample {
 }
 
 // Analytic derivatives of Gerstner displacement, summed before taking the normal.
-fn wave(point: vec2<f32>, direction: vec2<f32>, wavelength: f32, height: f32) -> WaveSample {
+fn wave(point: vec2<f32>, direction: vec2<f32>, wavelength: f32, height: f32, amplitude_scale: f32) -> WaveSample {
     let d = normalize(direction);
     let k = 2.0 * PI / wavelength;
-    let amplitude = height * scene.water.x;
+    let amplitude = height * amplitude_scale;
     let phase = k * dot(d, point) - sqrt(9.81 * k) * scene.camera_time.w;
     let s = sin(phase);
     let c = cos(phase);
@@ -26,24 +26,29 @@ struct WaterVertex {
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) wave_point: vec2<f32>,
+    @location(3) surface_data: vec2<f32>, // amplitude, 1 for secondary
 }
 
-@vertex fn vs_main(@location(0) grid: vec2<f32>) -> WaterVertex {
+@vertex fn vs_main(@location(0) grid: vec2<f32>, @builtin(instance_index) instance: u32) -> WaterVertex {
+    let secondary = instance > 0u && scene.secondary_water.z > 0.5;
+    let amplitude_scale = select(scene.water.x, scene.secondary_water.x, secondary);
+    let level = select(scene.water.w, scene.secondary_water.y, secondary);
+    let bounds = select(scene.water_bounds, scene.secondary_bounds, secondary);
     var point = grid + scene.water.yz;
-    if scene.water_bounds.z > 0.0 {
-        point = scene.water_bounds.xy + (grid / 128.0) * scene.water_bounds.zw;
+    if bounds.z > 0.0 {
+        point = bounds.xy + (grid / 128.0) * bounds.zw;
     }
-    let a = wave(point, vec2<f32>(0.9, 0.35), 38.0, 0.75);
-    let b = wave(point, vec2<f32>(-0.4, 0.9), 19.0, 0.38);
-    let c = wave(point, vec2<f32>(0.7, -0.6), 11.0, 0.22);
-    let d = wave(point, vec2<f32>(-0.8, -0.2), 7.0, 0.12);
+    let a = wave(point, vec2<f32>(0.9, 0.35), 38.0, 0.75, amplitude_scale);
+    let b = wave(point, vec2<f32>(-0.4, 0.9), 19.0, 0.38, amplitude_scale);
+    let c = wave(point, vec2<f32>(0.7, -0.6), 11.0, 0.22, amplitude_scale);
+    let d = wave(point, vec2<f32>(-0.8, -0.2), 7.0, 0.12, amplitude_scale);
     var displacement = a.displacement + b.displacement + c.displacement + d.displacement;
     var tx = vec3<f32>(1.0, 0.0, 0.0) + a.tangent_x + b.tangent_x + c.tangent_x + d.tangent_x;
     var tz = vec3<f32>(0.0, 0.0, 1.0) + a.tangent_z + b.tangent_z + c.tangent_z + d.tangent_z;
 
     // Couple the confined surface to the waterfall: water is drawn toward the spill,
     // accelerates at the lip, and forms a shallow drawdown instead of ending as a calm plane.
-    if scene.waterfall_origin.w > 0.0 {
+    if scene.waterfall_origin.w > 0.0 && !secondary {
         let spill = scene.waterfall_origin.xyz;
         let flow = normalize(vec2<f32>(scene.waterfall_shape.x, scene.waterfall_shape.y));
         let across = vec2<f32>(flow.y, -flow.x);
@@ -62,10 +67,28 @@ struct WaterVertex {
         tx.y -= flow.x * suction * 0.10 + across.x * lateral * channel * 0.035;
         tz.y -= flow.y * suction * 0.10 + across.y * lateral * channel * 0.035;
     }
-    let world = vec3<f32>(point.x, scene.water.w, point.y) + displacement;
+    if scene.waterfall_origin.w > 0.0 && secondary {
+        let spill = scene.waterfall_origin.xyz;
+        let flow = normalize(vec2<f32>(scene.waterfall_shape.x, scene.waterfall_shape.y));
+        let flight = sqrt(2.0 * max(scene.waterfall_shape.z, 0.05) / 9.81);
+        let landing = spill.xz + flow * (0.22 + 1.3 * flight);
+        let delta = point - landing;
+        let radius = length(delta);
+        let impact = exp(-radius * radius * 2.4);
+        let ring = sin(radius * 13.0 - scene.camera_time.w * 8.0) * exp(-radius * 1.7);
+        displacement.y += impact * 0.075 + ring * 0.028;
+        let downstream = max(dot(delta, flow), 0.0);
+        let lateral = abs(dot(delta, vec2<f32>(flow.y, -flow.x)));
+        let wake = exp(-lateral * 1.7) * exp(-downstream * 0.22) * smoothstep(0.0, 0.7, downstream);
+        displacement.y += wake * (noise(point * 4.2 - flow * scene.camera_time.w * 1.8) - 0.5) * 0.055;
+        displacement.x += flow.x * wake * 0.035;
+        displacement.z += flow.y * wake * 0.035;
+    }
+    let world = vec3<f32>(point.x, level, point.y) + displacement;
     var out: WaterVertex;
     out.world = world;
     out.wave_point = point;
+    out.surface_data = vec2<f32>(amplitude_scale, select(0.0, 1.0, secondary));
     out.normal = normalize(cross(tz, tx));
     out.clip = scene.view_projection * vec4<f32>(world, 1.0);
     return out;
@@ -137,12 +160,12 @@ fn flowing_ripples(point: vec2<f32>) -> vec2<f32> {
     return slope;
 }
 
-fn detailed_normal(point: vec2<f32>, world: vec3<f32>, distance: f32) -> vec3<f32> {
+fn detailed_normal(point: vec2<f32>, world: vec3<f32>, distance: f32, amplitude_scale: f32) -> vec3<f32> {
     // Evaluate at the interpolated undisplaced coordinate, not the displaced XZ position.
-    let a = wave(point, vec2<f32>(0.9, 0.35), 38.0, 0.75);
-    let b = wave(point, vec2<f32>(-0.4, 0.9), 19.0, 0.38);
-    let c = wave(point, vec2<f32>(0.7, -0.6), 11.0, 0.22);
-    let d = wave(point, vec2<f32>(-0.8, -0.2), 7.0, 0.12);
+    let a = wave(point, vec2<f32>(0.9, 0.35), 38.0, 0.75, amplitude_scale);
+    let b = wave(point, vec2<f32>(-0.4, 0.9), 19.0, 0.38, amplitude_scale);
+    let c = wave(point, vec2<f32>(0.7, -0.6), 11.0, 0.22, amplitude_scale);
+    let d = wave(point, vec2<f32>(-0.8, -0.2), 7.0, 0.12, amplitude_scale);
     let tx = vec3<f32>(1.0, 0.0, 0.0) + a.tangent_x + b.tangent_x + c.tangent_x + d.tangent_x;
     let tz = vec3<f32>(0.0, 0.0, 1.0) + a.tangent_z + b.tangent_z + c.tangent_z + d.tangent_z;
     let base = normalize(cross(tz, tx));
@@ -191,9 +214,9 @@ fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> 
     let ripple = flowing_ripples(in.world.xz) * 0.5 * scene.water.x * ripple_fade;
     var normal = normalize(in.normal + vec3<f32>(ripple.x, 0.0, ripple.y));
     if scene.surface.x > 0.5 {
-        normal = detailed_normal(in.wave_point, in.world, distance);
+        normal = detailed_normal(in.wave_point, in.world, distance, in.surface_data.x);
     }
-    if scene.waterfall_origin.w > 0.0 {
+    if scene.waterfall_origin.w > 0.0 && in.surface_data.y < 0.5 {
         let spill = scene.waterfall_origin.xyz;
         let flow2 = normalize(vec2<f32>(scene.waterfall_shape.x, scene.waterfall_shape.y));
         let across2 = vec2<f32>(flow2.y, -flow2.x);
@@ -225,7 +248,7 @@ fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> 
     var alpha = sqrt(pow(scene.surface.z, 4.0) + variance);
     // The outlet contains unresolved turbulent slopes. Feed that variance into GGX
     // instead of letting a single broad mirror lobe paint a white stripe over the surface.
-    if scene.waterfall_origin.w > 0.0 {
+    if scene.waterfall_origin.w > 0.0 && in.surface_data.y < 0.5 {
         let spill_r = scene.waterfall_origin.xyz;
         let flow_r = normalize(vec2<f32>(scene.waterfall_shape.x, scene.waterfall_shape.y));
         let across_r = vec2<f32>(flow_r.y, -flow_r.x);
