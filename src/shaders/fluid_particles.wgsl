@@ -14,6 +14,31 @@ struct Aabb { min: vec4<f32>, max: vec4<f32> };
 @group(0) @binding(3) var<storage, read_write> vel_dst: array<vec4<f32>>;
 @group(0) @binding(4) var<uniform> p: Params;
 @group(0) @binding(5) var<storage, read> colliders: array<Aabb>;
+@group(0) @binding(6) var<storage, read_write> grid_counts: array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> grid_particles: array<u32>;
+
+const GRID_DIM = vec3<u32>(64u, 32u, 96u);
+const GRID_ORIGIN = vec3<f32>(-8.0, -1.0, -4.0);
+const CELL_SIZE = 0.16;
+
+fn grid_cell(pos: vec3<f32>) -> vec3<u32> {
+    let c=vec3<i32>(floor((pos-GRID_ORIGIN)/CELL_SIZE));
+    return vec3<u32>(clamp(c,vec3<i32>(0),vec3<i32>(GRID_DIM)-vec3<i32>(1)));
+}
+fn grid_index(c: vec3<u32>) -> u32 { return c.x + GRID_DIM.x*(c.y + GRID_DIM.y*c.z); }
+
+@compute @workgroup_size(64)
+fn clear_grid(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x < p.counts.z { atomicStore(&grid_counts[id.x],0u); }
+}
+
+@compute @workgroup_size(64)
+fn insert_grid(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i=id.x; if i>=p.counts.y || src[i].w<0.5 { return; }
+    let cell=grid_index(grid_cell(src[i].xyz));
+    let slot=atomicAdd(&grid_counts[cell],1u);
+    if slot<p.counts.w { grid_particles[cell*p.counts.w+slot]=i; }
+}
 
 @compute @workgroup_size(64)
 fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
