@@ -370,7 +370,7 @@ impl Renderer {
         let secondary_water = scene.secondary_water;
         let detailed = water.style == WaterStyle::Realistic;
         let secondary_detailed = secondary_water.is_some_and(|w| w.style == WaterStyle::Realistic);
-        self.water.prepare(gpu, scene.water.is_some() && (detailed || secondary_detailed));
+        self.water.prepare(gpu, (scene.water.is_some() || secondary_water.is_some()) && (detailed || secondary_detailed));
         let sun = scene.sun.direction();
         let matrix = camera.view_projection(self.width as f32 / self.height as f32);
         let reflection_enabled =
