@@ -5,7 +5,7 @@ pub(super) struct WaterfallPass {
     pipeline: wgpu::RenderPipeline,
 }
 impl WaterfallPass {
-    pub fn new(gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Self {
+    pub fn new(\n        gpu: &Gpu,\n        layout: &wgpu::BindGroupLayout,\n        inputs: &wgpu::BindGroupLayout,\n    ) -> Self {
         let shader = gpu
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -23,7 +23,7 @@ impl WaterfallPass {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("waterfall-layout"),
-                bind_group_layouts: &[layout],
+                bind_group_layouts: &[layout, inputs],
                 push_constant_ranges: &[],
             });
         Self {
@@ -68,6 +68,6 @@ impl WaterfallPass {
     pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
         // Receiving puddle, falling sheet, then spray. Approximate transparency ordering.
-        pass.draw(0..(96 * 3 + 32 * 32 * 6 + 48 * 6), 0..1);
+        pass.draw(0..(96 * 3 + 32 * 32 * 6 + 384 * 6), 0..1);
     }
 }
