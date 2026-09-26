@@ -159,15 +159,22 @@ fn corner(index: u32) -> vec2<f32> {
         let side = normalize(cross(view, tangent));
         let uv = corner(i % 6u) * 2.0 - vec2<f32>(1.0);
 
-        let mist = smoothstep(0.82, 0.995, random(id + 41.0));
-        let radius = mix(0.004, 0.013, random(id + 1.0));
-        let stretch = mix(2.5, 8.0, 1.0 - mist);
+        let class_seed = random(id + 41.0);
+        let ligament = 1.0 - step(0.16, class_seed);
+        let mist = step(0.90, class_seed);
+        let droplet = 1.0 - max(ligament, mist);
+
+        let base_radius = mix(0.006, 0.018, random(id + 1.0));
+        let radius = base_radius * (droplet + ligament * 0.72 + mist * 2.8);
+        let stretch = droplet * mix(1.15, 2.2, random(id + 19.0))
+            + ligament * mix(3.0, 6.0, random(id + 29.0))
+            + mist * mix(0.65, 1.25, random(id + 37.0));
         out.world = center + side * uv.x * radius + tangent * uv.y * radius * stretch;
         out.normal = view;
         out.uv = uv;
-        out.fade = sin(age * PI);
-        out.aeration = mix(0.35, 0.92, mist);
-        out.thickness = radius * 2.0;
+        out.fade = sin(age * PI) * mix(1.0, 0.42, mist);
+        out.aeration = droplet * 0.42 + ligament * 0.28 + mist * 0.88;
+        out.thickness = radius * mix(2.0, 0.45, mist);
     }
 
     out.clip = scene.view_projection * vec4<f32>(out.world, 1.0);
@@ -181,13 +188,14 @@ fn corner(index: u32) -> vec2<f32> {
 
     if in.kind == 2u {
         let r = length(in.uv);
-        let coverage = 1.0 - smoothstep(0.50, 1.0, r);
+        let coverage = 1.0 - smoothstep(0.42, 1.0, r);
         let fresnel = 0.02037 + 0.97963 * pow(1.0 - max(dot(in.normal, view), 0.0), 5.0);
         let reflected = sky_lighting(reflect(-view, in.normal), visibility);
-        let clear_water = mix(vec3<f32>(0.76, 0.84, 0.86), reflected, fresnel);
+        let refracted = refracted_scene(in.clip, in.normal, in.thickness);
+        let clear_water = mix(refracted, reflected, fresnel);
         let whitewater = vec3<f32>(0.88, 0.92, 0.91) * (0.58 + 0.42 * visibility);
-        let color = mix(clear_water, whitewater, in.aeration);
-        let opacity = coverage * in.fade * mix(0.22, 0.58, in.aeration);
+        let color = mix(clear_water, whitewater, in.aeration * 0.72);
+        let opacity = coverage * in.fade * mix(0.16, 0.42, in.aeration);
         return vec4<f32>(color, opacity);
     }
 
@@ -207,9 +215,9 @@ fn corner(index: u32) -> vec2<f32> {
         let water = mix(vec3<f32>(0.025, 0.055, 0.060), reflected, fresnel);
         let impact = exp(-radius * radius * 7.5);
         let foam_noise = smoothstep(0.42, 0.67, n1 * 0.62 + n2 * 0.38);
-        let foam = impact * foam_noise * 0.82;
+        let foam = impact * mix(0.35, 1.0, foam_noise) * 0.92;
         let color = mix(water, vec3<f32>(0.84, 0.90, 0.89) * (0.55 + 0.45 * visibility), foam);
-        return vec4<f32>(color, edge * (0.10 + foam * 0.72));
+        return vec4<f32>(color, edge * (0.035 + foam * 0.58));
     }
 
     // Multi-scale capillary perturbation. Unlike the old periodic vertical sine streaks,
