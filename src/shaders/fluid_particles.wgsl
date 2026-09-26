@@ -30,15 +30,23 @@ fn grid_index(c: vec3<u32>) -> u32 { return c.x + GRID_DIM.x*(c.y + GRID_DIM.y*c
 
 @compute @workgroup_size(64)
 fn clear_grid(@builtin(global_invocation_id) id: vec3<u32>) {
-    if id.x < p.counts.z { atomicStore(&grid_counts[id.x],0u); }
+    if id.x < 196608u { atomicStore(&grid_counts[id.x],0u); }
 }
 
 @compute @workgroup_size(64)
+fn scheduled_to_emit(i: u32) -> bool {
+    if p.counts.w==0u { return false; }
+    let start=p.counts.z;
+    let end=(start+p.counts.w)%p.counts.y;
+    if start+p.counts.w<=p.counts.y { return i>=start && i<start+p.counts.w; }
+    return i>=start || i<end;
+}
+
 fn insert_grid(@builtin(global_invocation_id) id: vec3<u32>) {
-    let i=id.x; if i>=p.counts.y || src[i].w<0.5 { return; }
+    let i=id.x; if i>=p.counts.y || src[i].w<0.5 || scheduled_to_emit(i) { return; }
     let cell=grid_index(grid_cell(src[i].xyz));
     let slot=atomicAdd(&grid_counts[cell],1u);
-    if slot<p.counts.w { grid_particles[cell*p.counts.w+slot]=i; }
+    if slot<32u { grid_particles[cell*32u+slot]=i; }
 }
 
 fn in_grid(c: vec3<i32>) -> bool {
@@ -58,9 +66,9 @@ fn compute_density(@builtin(global_invocation_id) id: vec3<u32>) {
                 let cell=base+vec3<i32>(dx,dy,dz);
                 if in_grid(cell) {
                     let ci=grid_index(vec3<u32>(cell));
-                    let n=min(atomicLoad(&grid_counts[ci]),p.counts.w);
+                    let n=min(atomicLoad(&grid_counts[ci]),32u);
                     for(var slot=0u;slot<n;slot++) {
-                        let j=grid_particles[ci*p.counts.w+slot];
+                        let j=grid_particles[ci*32u+slot];
                         let q=length(xi-src[j].xyz)/h;
                         if q<1.0 {
                             let w=1.0-q;
@@ -80,12 +88,13 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let fx=f32(i%32u)/31.0; let fy=f32((i/32u)%8u)/7.0; let fz=f32((i/256u)%16u)/15.0;
     let spawn=mix(p.emitter_min.xyz,p.emitter_max.xyz,vec3<f32>(fx,fy,fz));
     var pos=src[i].xyz; var vel=vel_src[i].xyz;
-    if src[i].w<0.5 { pos=spawn; vel=p.emitter_velocity.xyz; }
+    let emit_now=scheduled_to_emit(i);
+    if emit_now { pos=spawn; vel=p.emitter_velocity.xyz; }
 
     // Weakly-compressible SPH pressure. Density is dimensionless for now because the
     // kernel is normalized only relative to particle spacing; rest density therefore
     // uses the same scale instead of pretending to be kg/m^3.
-    if src[i].w>=0.5 {
+    if src[i].w>=0.5 && !emit_now {
         let xi=src[i].xyz;
         let base=vec3<i32>(floor((xi-GRID_ORIGIN)/CELL_SIZE));
         let h=CELL_SIZE;
@@ -99,9 +108,9 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
                     let cell=base+vec3<i32>(dx,dy,dz);
                     if in_grid(cell) {
                         let ci=grid_index(vec3<u32>(cell));
-                        let n=min(atomicLoad(&grid_counts[ci]),p.counts.w);
+                        let n=min(atomicLoad(&grid_counts[ci]),32u);
                         for(var slot=0u;slot<n;slot++) {
-                            let j=grid_particles[ci*p.counts.w+slot];
+                            let j=grid_particles[ci*32u+slot];
                             if j!=i {
                                 let delta=xi-src[j].xyz;
                                 let dist=length(delta);
@@ -139,6 +148,6 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
             let normal=n*dot(vel,n); vel=normal+(vel-normal)*0.86;
         }
     }
-    if pos.y < -0.5 || abs(pos.x)>12.0 || abs(pos.z)>14.0 { pos=spawn; vel=p.emitter_velocity.xyz; }
+    if pos.y < -0.5 || abs(pos.x)>12.0 || abs(pos.z)>14.0 { dst[i]=vec4<f32>(0.0); vel_dst[i]=vec4<f32>(0.0); return; }
     dst[i]=vec4<f32>(pos,1.0); vel_dst[i]=vec4<f32>(vel,0.0);
 }
