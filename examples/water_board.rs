@@ -9,10 +9,14 @@ use gigantomachia::{
     scene::{MeshInstance, Scene, Sun},
     water::{Water, WaterBounds, WaterStyle},
 };
-use glam::{Vec2, Vec3};
+use glam::{Quat, Vec2, Vec3};
 use std::sync::Arc;
 
 fn cuboid(center: Vec3, half: Vec3, color: [f32; 3]) -> EngineResult<MeshInstance> {
+    oriented_cuboid(center, half, Quat::IDENTITY, color)
+}
+
+fn oriented_cuboid(center: Vec3, half: Vec3, rotation: Quat, color: [f32; 3]) -> EngineResult<MeshInstance> {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
     for (normal, u, v) in [
@@ -26,8 +30,8 @@ fn cuboid(center: Vec3, half: Vec3, color: [f32; 3]) -> EngineResult<MeshInstanc
         let first = vertices.len() as u32;
         for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
             vertices.push(Vertex {
-                position: (center + (normal + u * x + v * y) * half).to_array(),
-                normal: normal.to_array(),
+                position: (center + rotation * ((normal + u * x + v * y) * half)).to_array(),
+                normal: (rotation * normal).to_array(),
                 color,
             });
         }
@@ -37,15 +41,19 @@ fn cuboid(center: Vec3, half: Vec3, color: [f32; 3]) -> EngineResult<MeshInstanc
 }
 
 fn main() -> EngineResult<()> {
+    // The upper tray is physically tilted toward +Z. Water is supplied with no
+    // forward launch velocity; gravity projected onto this geometry creates the flow.
+    let upper_tilt = Quat::from_rotation_x(-0.06);
     let mut meshes = vec![
         cuboid(
             Vec3::new(0.0, -0.2, 0.0),
             Vec3::new(14.0, 0.2, 14.0),
             [0.22, 0.25, 0.27],
         )?,
-        cuboid(
+        oriented_cuboid(
             Vec3::new(0.0, 1.0, 0.0),
             Vec3::new(4.0, 0.22, 2.5),
+            upper_tilt,
             [0.27, 0.12, 0.045],
         )?,
     ];
@@ -119,13 +127,13 @@ fn main() -> EngineResult<()> {
         [0.035, 0.28, 0.65],
     )?);
     let mut fluid = FluidWorld::default();
-    fluid.add_collider(FluidCollider::cuboid(Vec3::new(0.0, 1.0, 0.0), Vec3::new(4.0, 0.22, 2.5))?);
+    fluid.add_collider(FluidCollider::oriented_cuboid(Vec3::new(0.0, 1.0, 0.0), Vec3::new(4.0, 0.22, 2.5), upper_tilt)?);
     for x in [-3.91, 3.91] { fluid.add_collider(FluidCollider::cuboid(Vec3::new(x, 1.55, 0.0), Vec3::new(0.09, 0.33, 2.5))?); }
     fluid.add_collider(FluidCollider::cuboid(Vec3::new(0.0, 1.55, -2.41), Vec3::new(3.82, 0.33, 0.09))?);
     for x in [-2.31, 2.31] { fluid.add_collider(FluidCollider::cuboid(Vec3::new(x, 1.55, 2.41), Vec3::new(1.51, 0.33, 0.09))?); }
     fluid.add_collider(FluidCollider::cuboid(Vec3::new(0.0, 0.055, 5.25), Vec3::new(2.35, 0.055, 3.15))?);
     for x in [-2.30, 2.30] { fluid.add_collider(FluidCollider::cuboid(Vec3::new(x, 0.34, 5.25), Vec3::new(0.08, 0.34, 3.15))?); }
-    fluid.add_emitter(FluidEmitter::new(Aabb::new(Vec3::new(0.0, 1.58, -1.55), Vec3::new(0.40, 0.12, 0.20))?, Vec3::new(0.0, 0.0, 0.72), 900.0)?);
+    fluid.add_emitter(FluidEmitter::new(Aabb::new(Vec3::new(0.0, 1.58, -1.55), Vec3::new(0.40, 0.12, 0.20))?, Vec3::ZERO, 900.0)?);
 
     let scene = Scene {
         camera: Camera::looking_at(Vec3::new(6.5, 5.5, 7.5), Vec3::new(0.0, 1.1, 0.0))?,
