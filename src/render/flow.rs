@@ -1,4 +1,8 @@
-//! Low-resolution shallow-water state for the receiving channel.
+//! GPU fluid dynamics core.
+//!
+//! This is the first engine-level fluid layer: a conservative shallow-water state
+//! (surface displacement, horizontal velocity, foam) shared by rendering.  Free-surface
+//! outflow/ballistic transfer will build on this state instead of scripted waterfall parts.
 use super::Gpu;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
@@ -6,8 +10,8 @@ pub(super) const FLOW_W: u32 = 64;
 pub(super) const FLOW_H: u32 = 128;
 #[repr(C)] #[derive(Clone, Copy, Pod, Zeroable)]
 struct FlowParams { bounds:[f32;4], source:[f32;4], direction:[f32;4] }
-pub(super) struct FlowSimulation { pipeline:wgpu::ComputePipeline, bind_groups:[wgpu::BindGroup;2], params:wgpu::Buffer, current:usize }
-impl FlowSimulation {
+pub(super) struct FluidSimulation { pipeline:wgpu::ComputePipeline, bind_groups:[wgpu::BindGroup;2], params:wgpu::Buffer, current:usize }
+impl FluidSimulation {
  pub fn layout(gpu:&Gpu)->wgpu::BindGroupLayout { gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:Some("water-flow-layout"),entries:&[
   wgpu::BindGroupLayoutEntry{binding:0,visibility:wgpu::ShaderStages::COMPUTE|wgpu::ShaderStages::VERTEX_FRAGMENT,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:true},has_dynamic_offset:false,min_binding_size:None},count:None},
   wgpu::BindGroupLayoutEntry{binding:1,visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:false},has_dynamic_offset:false,min_binding_size:None},count:None},
