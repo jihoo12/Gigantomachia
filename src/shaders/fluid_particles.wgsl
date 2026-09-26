@@ -102,6 +102,8 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
         let stiffness=7.0;
         let pressure_i=max(density[i]-rest_density,0.0)*stiffness;
         var pressure_accel=vec3<f32>(0.0);
+        var viscosity_delta=vec3<f32>(0.0);
+        var viscosity_weight=0.0;
         for(var dz=-1;dz<=1;dz++) {
             for(var dy=-1;dy<=1;dy++) {
                 for(var dx=-1;dx<=1;dx++) {
@@ -119,6 +121,9 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
                                     let grad=(1.0-dist/h)*(1.0-dist/h);
                                     let rho_j=max(density[j],1.0);
                                     pressure_accel+=(delta/dist)*((pressure_i+pressure_j)*0.5/rho_j)*grad;
+                                    let visc_w=1.0-dist/h;
+                                    viscosity_delta+=(vel_src[j].xyz-vel)*visc_w;
+                                    viscosity_weight+=visc_w;
                                 }
                             }
                         }
@@ -130,6 +135,10 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
         let a_len=length(pressure_accel);
         if a_len>max_pressure_accel { pressure_accel*=max_pressure_accel/a_len; }
         vel+=pressure_accel*p.dt_gravity.x;
+        if viscosity_weight>0.0 {
+            // XSPH-style velocity smoothing: damp local jitter without erasing bulk flow.
+            vel+=viscosity_delta/viscosity_weight*0.12;
+        }
     }
     vel.y-=p.dt_gravity.y*p.dt_gravity.x; pos+=vel*p.dt_gravity.x;
     let r=p.dt_gravity.z;
@@ -144,8 +153,13 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
             if b.z<depth { axis=2u; side=1.0; }
             var n=vec3<f32>(0.0); n[axis]=side;
             if side<0.0 { pos[axis]=lo[axis]; } else { pos[axis]=hi[axis]; }
-            let vn=dot(vel,n); if vn<0.0 { vel-=n*vn*(1.0+p.dt_gravity.w); }
-            let normal=n*dot(vel,n); vel=normal+(vel-normal)*0.86;
+            let vn=dot(vel,n);
+            if vn<0.0 {
+                // Water should settle and slide on solids instead of bouncing like a ball.
+                vel-=n*vn;
+            }
+            let normal=n*dot(vel,n);
+            vel=normal+(vel-normal)*0.94;
         }
     }
     if pos.y < -0.5 || abs(pos.x)>12.0 || abs(pos.z)>14.0 { dst[i]=vec4<f32>(0.0); vel_dst[i]=vec4<f32>(0.0); return; }
