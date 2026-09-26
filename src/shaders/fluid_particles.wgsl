@@ -33,7 +33,6 @@ fn clear_grid(@builtin(global_invocation_id) id: vec3<u32>) {
     if id.x < 196608u { atomicStore(&grid_counts[id.x],0u); }
 }
 
-@compute @workgroup_size(64)
 fn scheduled_to_emit(i: u32) -> bool {
     if p.counts.w==0u { return false; }
     let start=p.counts.z;
@@ -42,6 +41,7 @@ fn scheduled_to_emit(i: u32) -> bool {
     return i>=start || i<end;
 }
 
+@compute @workgroup_size(64)
 fn insert_grid(@builtin(global_invocation_id) id: vec3<u32>) {
     let i=id.x; if i>=p.counts.y || src[i].w<0.5 || scheduled_to_emit(i) { return; }
     let cell=grid_index(grid_cell(src[i].xyz));
