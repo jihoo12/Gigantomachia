@@ -221,11 +221,6 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
                     water.style = WaterStyle::Realistic;
                 }
             }
-            "--no-waterfall" => {
-                if let Some(water) = &mut demo.scene.water {
-                    water.waterfall = None;
-                }
-            }
             "--no-reflections" => {
                 if let Some(water) = &mut demo.scene.water {
                     water.reflections = false;
@@ -251,7 +246,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
         [] => app::run(demo, AppConfig::default()),
         [flag] if flag == "--help" => {
             println!(
-                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --no-waterfall --no-reflections --realistic-water --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam | 4: water style | 5: scene reflections",
+                "{} demo\nOptions: --frames COUNT | --headless output.png [seconds]\nOptional: --no-reflections --realistic-water --no-shadows --no-refraction --no-foam\n\nWASD: move | Q/E: down/up | Shift: faster | RMB drag: look\nSpace: pause | -/+: amplitude | [/]: speed | R: reset | Esc: exit\n1: shadows | 2: refraction | 3: shore foam | 4: water style | 5: scene reflections",
                 demo.name
             );
             Ok(())
