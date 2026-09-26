@@ -1,6 +1,5 @@
 //! Reusable forward renderer. Owns frame resources, draw order, and GPU mesh caching.
 
-mod flow;
 mod fluid_particles;
 mod gpu;
 mod mesh;
@@ -43,7 +42,6 @@ struct FrameUniforms {
 pub struct Renderer {
     sky: wgpu::RenderPipeline,
     water: WaterPass,
-    flow: flow::FluidSimulation,
     particle_fluid: fluid_particles::ParticleFluid,
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
@@ -293,7 +291,6 @@ impl Renderer {
             ],
         });
         let water_layout = targets::water_layout(gpu);
-        let flow_layout = flow::FluidSimulation::layout(gpu);
         let post_layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -324,8 +321,7 @@ impl Renderer {
                 &[],
                 Some(false),
             ),
-            water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout, &flow_layout),
-            flow: flow::FluidSimulation::new(gpu, &flow_layout),
+            water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout),
             particle_fluid: fluid_particles::ParticleFluid::new(gpu, &layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
@@ -461,7 +457,6 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("scene-frame"),
             });
-        self.flow.update(gpu, &mut encoder, scene);
         self.particle_fluid.update(gpu, &mut encoder);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -578,7 +573,6 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
-            pass.set_bind_group(2, self.flow.binding(), &[]);
             self.water.encode(&mut pass, detailed || secondary_detailed, 1 + u32::from(secondary_water.is_some()));
             self.particle_fluid.encode(&mut pass);
         }
