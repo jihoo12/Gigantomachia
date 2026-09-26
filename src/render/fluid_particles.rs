@@ -13,13 +13,15 @@ struct Params{dt_gravity:[f32;4],emitter:[f32;4],emitter_dir:[f32;4],board:[f32;
 
 pub(super) struct ParticleFluid {
  pipeline:wgpu::ComputePipeline,
+ render_pipeline:wgpu::RenderPipeline,
  groups:[wgpu::BindGroup;2],
+ render_groups:[wgpu::BindGroup;2],
  current:usize,
  params:wgpu::Buffer,
 }
 
 impl ParticleFluid {
- pub fn new(gpu:&Gpu)->Self{
+ pub fn new(gpu:&Gpu,scene_layout:&wgpu::BindGroupLayout)->Self{
   let mut pos=vec![[0.0f32;4];PARTICLE_COUNT as usize];
   let mut vel=vec![[0.0f32;4];PARTICLE_COUNT as usize];
   for i in 0..PARTICLE_COUNT as usize {
@@ -39,10 +41,19 @@ impl ParticleFluid {
    wgpu::BindGroupEntry{binding:2,resource:c.as_entire_binding()},wgpu::BindGroupEntry{binding:3,resource:d.as_entire_binding()},
    wgpu::BindGroupEntry{binding:4,resource:params.as_entire_binding()}]});
   let groups=[group(&pa,&pb,&va,&vb),group(&pb,&pa,&vb,&va)];
+  let render_layout=gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:Some("fluid-particle-render-layout"),entries:&[
+   wgpu::BindGroupLayoutEntry{binding:0,visibility:wgpu::ShaderStages::VERTEX,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:true},has_dynamic_offset:false,min_binding_size:None},count:None},
+   wgpu::BindGroupLayoutEntry{binding:1,visibility:wgpu::ShaderStages::VERTEX,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:true},has_dynamic_offset:false,min_binding_size:None},count:None}]});
+  let rg=|p:&wgpu::Buffer,v:&wgpu::Buffer|gpu.device.create_bind_group(&wgpu::BindGroupDescriptor{label:Some("fluid-particle-render-bindings"),layout:&render_layout,entries:&[
+   wgpu::BindGroupEntry{binding:0,resource:p.as_entire_binding()},wgpu::BindGroupEntry{binding:1,resource:v.as_entire_binding()}]});
+  let render_groups=[rg(&pa,&va),rg(&pb,&vb)];
   let shader=gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("fluid-particles"),source:wgpu::ShaderSource::Wgsl(include_str!("../shaders/fluid_particles.wgsl").into())});
   let pl=gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:Some("fluid-particle-pipeline-layout"),bind_group_layouts:&[&layout],push_constant_ranges:&[]});
   let pipeline=gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:Some("fluid-particle-simulation"),layout:Some(&pl),module:&shader,entry_point:Some("cs_main"),compilation_options:Default::default(),cache:None});
-  Self{pipeline,groups,current:0,params}
+  let render_shader=gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("fluid-particle-render"),source:wgpu::ShaderSource::Wgsl(format!("{}\n{}",include_str!("../shaders/common.wgsl"),include_str!("../shaders/fluid_particles_render.wgsl")).into())});
+  let rpl=gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:Some("fluid-particle-render-pipeline-layout"),bind_group_layouts:&[scene_layout,&render_layout],push_constant_ranges:&[]});
+  let render_pipeline=gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{label:Some("fluid-particle-debug-render"),layout:Some(&rpl),vertex:wgpu::VertexState{module:&render_shader,entry_point:Some("vs_main"),buffers:&[],compilation_options:Default::default()},fragment:Some(wgpu::FragmentState{module:&render_shader,entry_point:Some("fs_main"),targets:&[Some(wgpu::ColorTargetState{format:super::targets::HDR_FORMAT,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})],compilation_options:Default::default()}),primitive:wgpu::PrimitiveState{cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState{format:super::DEPTH_FORMAT,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None});
+  Self{pipeline,render_pipeline,groups,render_groups,current:0,params}
  }
  pub fn update(&mut self,gpu:&Gpu,encoder:&mut wgpu::CommandEncoder){
   let p=Params{
