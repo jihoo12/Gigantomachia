@@ -81,6 +81,47 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let spawn=mix(p.emitter_min.xyz,p.emitter_max.xyz,vec3<f32>(fx,fy,fz));
     var pos=src[i].xyz; var vel=vel_src[i].xyz;
     if src[i].w<0.5 { pos=spawn; vel=p.emitter_velocity.xyz; }
+
+    // Weakly-compressible SPH pressure. Density is dimensionless for now because the
+    // kernel is normalized only relative to particle spacing; rest density therefore
+    // uses the same scale instead of pretending to be kg/m^3.
+    if src[i].w>=0.5 {
+        let xi=src[i].xyz;
+        let base=vec3<i32>(floor((xi-GRID_ORIGIN)/CELL_SIZE));
+        let h=CELL_SIZE;
+        let rest_density=4.0;
+        let stiffness=7.0;
+        let pressure_i=max(density[i]-rest_density,0.0)*stiffness;
+        var pressure_accel=vec3<f32>(0.0);
+        for(var dz=-1;dz<=1;dz++) {
+            for(var dy=-1;dy<=1;dy++) {
+                for(var dx=-1;dx<=1;dx++) {
+                    let cell=base+vec3<i32>(dx,dy,dz);
+                    if in_grid(cell) {
+                        let ci=grid_index(vec3<u32>(cell));
+                        let n=min(atomicLoad(&grid_counts[ci]),p.counts.w);
+                        for(var slot=0u;slot<n;slot++) {
+                            let j=grid_particles[ci*p.counts.w+slot];
+                            if j!=i {
+                                let delta=xi-src[j].xyz;
+                                let dist=length(delta);
+                                if dist>0.0001 && dist<h {
+                                    let pressure_j=max(density[j]-rest_density,0.0)*stiffness;
+                                    let grad=(1.0-dist/h)*(1.0-dist/h);
+                                    let rho_j=max(density[j],1.0);
+                                    pressure_accel+=(delta/dist)*((pressure_i+pressure_j)*0.5/rho_j)*grad;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let max_pressure_accel=35.0;
+        let a_len=length(pressure_accel);
+        if a_len>max_pressure_accel { pressure_accel*=max_pressure_accel/a_len; }
+        vel+=pressure_accel*p.dt_gravity.x;
+    }
     vel.y-=p.dt_gravity.y*p.dt_gravity.x; pos+=vel*p.dt_gravity.x;
     let r=p.dt_gravity.z;
     for(var c=0u;c<p.counts.x;c++) {
