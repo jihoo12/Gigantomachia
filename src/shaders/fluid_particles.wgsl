@@ -17,7 +17,6 @@ struct Aabb { min: vec4<f32>, max: vec4<f32> };
 @group(0) @binding(6) var<storage, read_write> grid_counts: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> grid_particles: array<u32>;
 @group(0) @binding(8) var<storage, read_write> density: array<f32>;
-@group(0) @binding(9) var<storage, read_write> emitter_state: array<atomic<u32>>;
 
 const GRID_DIM = vec3<u32>(64u, 32u, 96u);
 const GRID_ORIGIN = vec3<f32>(-8.0, -1.0, -4.0);
@@ -81,18 +80,17 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let fx=f32(i%32u)/31.0; let fy=f32((i/32u)%8u)/7.0; let fz=f32((i/256u)%16u)/15.0;
     let spawn=mix(p.emitter_min.xyz,p.emitter_max.xyz,vec3<f32>(fx,fy,fz));
     var pos=src[i].xyz; var vel=vel_src[i].xyz;
-    var emit_now=false;
-    if src[i].w<0.5 {
-        let ticket=atomicAdd(&emitter_state[0],1u);
-        if ticket<atomicLoad(&emitter_state[1]) {
-            emit_now=true;
-            pos=spawn;
-            vel=p.emitter_velocity.xyz;
-        } else {
-            dst[i]=vec4<f32>(0.0);
-            vel_dst[i]=vec4<f32>(0.0);
-            return;
-        }
+    // Only inactive slots may be emitted. The CPU supplies a per-frame budget in counts.z.
+    // Selecting the first inactive indices is deterministic and, unlike the old ring cursor,
+    // never overwrites a live particle.
+    let emit_now=src[i].w<0.5 && i<p.counts.z;
+    if emit_now {
+        pos=spawn;
+        vel=p.emitter_velocity.xyz;
+    } else if src[i].w<0.5 {
+        dst[i]=vec4<f32>(0.0);
+        vel_dst[i]=vec4<f32>(0.0);
+        return;
     }
 
     // Weakly-compressible SPH pressure. Density is dimensionless for now because the
