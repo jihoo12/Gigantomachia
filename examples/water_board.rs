@@ -3,10 +3,10 @@ mod support;
 use gigantomachia::{
     app::{self, AppAction, AppConfig, Application},
     camera::Camera,
-    fluid::{BoxCollider, FIXED_DT, Fluid},
+    fluid::{BoxCollider, FIXED_DT, Fluid, GpuFluid},
     input::{Input, KeyCode as Key},
     mesh::{Mesh, Vertex},
-    render::EngineResult,
+    render::{EngineResult, Gpu},
     scene::{MeshInstance, Scene, Sun},
 };
 use glam::Vec3;
@@ -48,9 +48,12 @@ struct FluidDemo {
     paused: bool,
     accumulator: f32,
     speed: f32,
+    cpu: bool,
+    time: f64,
+    pending: Vec<bool>,
 }
 impl FluidDemo {
-    fn new(hold_closed: bool) -> EngineResult<Self> {
+    fn new(hold_closed: bool, cpu: bool) -> EngineResult<Self> {
         let bounds = [
             (Vec3::new(-2.2, -0.3, -1.6), Vec3::new(2.2, 0.0, 4.2)),
             (Vec3::new(-1.12, 1.45, -1.12), Vec3::new(1.12, 1.65, 1.12)),
@@ -89,7 +92,11 @@ impl FluidDemo {
         let scene = Scene {
             camera: Camera::looking_at(Vec3::new(4.2, 6.5, 7.0), Vec3::new(0.0, 1.1, 1.0))?,
             meshes,
-            fluids: vec![fluid.surface()?],
+            fluids: if cpu {
+                vec![fluid.surface()?]
+            } else {
+                Vec::new()
+            },
             sun: Sun {
                 direction: Vec3::new(-0.6, 0.8, -0.7),
                 ..Default::default()
@@ -108,6 +115,9 @@ impl FluidDemo {
             paused: false,
             accumulator: 0.0,
             speed: 1.0,
+            cpu,
+            time: 0.0,
+            pending: Vec::new(),
         })
     }
     fn set_gate(&mut self, open: bool) {
@@ -122,9 +132,14 @@ impl FluidDemo {
         self.gate_open = open;
     }
     fn step(&mut self) {
-        if self.automatic && self.fluid.time() >= 1.0 {
+        if self.automatic && self.time >= 1.0 {
             self.set_gate(true);
             self.automatic = false;
+        }
+        self.time += f64::from(FIXED_DT);
+        if !self.cpu {
+            self.pending.push(self.gate_open);
+            return;
         }
         if self.gate_open {
             self.fluid.step(&self.solids);
@@ -135,17 +150,68 @@ impl FluidDemo {
         }
     }
     fn refresh(&mut self) -> EngineResult<()> {
-        self.demo.scene.fluids = vec![self.fluid.surface()?];
+        if self.cpu {
+            self.demo.scene.fluids = vec![self.fluid.surface()?];
+        }
         Ok(())
     }
 }
 impl Application for FluidDemo {
+    fn prepare_render(&mut self, gpu: &Gpu) -> EngineResult<()> {
+        if self.cpu {
+            return Ok(());
+        }
+        if self.demo.scene.gpu_fluids.is_empty() {
+            self.demo.scene.gpu_fluids.push(Arc::new(GpuFluid::new(
+                gpu,
+                &self.fluid,
+                Vec3::new(-2.5, -0.4, -1.9),
+                Vec3::new(2.5, 3.0, 4.5),
+            )?));
+        }
+        let fluid = &self.demo.scene.gpu_fluids[0];
+        let changed = !self.pending.is_empty();
+        let mut start = 0;
+        while start < self.pending.len() {
+            let open = self.pending[start];
+            let mut end = start + 1;
+            while end < self.pending.len() && end - start < 8 && self.pending[end] == open {
+                end += 1;
+            }
+            if !open {
+                self.solids.push(self.gate);
+            }
+            let result = fluid.step(gpu, &self.solids, (end - start) as u32);
+            if !open {
+                self.solids.pop();
+            }
+            result?;
+            start = end;
+        }
+        self.pending.clear();
+        if changed {
+            fluid.reconstruct(gpu);
+        }
+        Ok(())
+    }
+    fn release_gpu(&mut self) {
+        // The seed is CPU-owned; reset simulation time when a device must be recreated.
+        if !self.cpu {
+            self.demo.scene.gpu_fluids.clear();
+            self.pending.clear();
+            self.time = 0.0;
+            self.accumulator = 0.0;
+            self.automatic = !self.hold_closed;
+            self.set_gate(false);
+        }
+    }
+
     fn scene(&self) -> &Scene {
         &self.demo.scene
     }
     fn update(&mut self, input: &Input, dt: f32) -> AppAction {
         if input.pressed(Key::KeyR) {
-            match Self::new(self.hold_closed) {
+            match Self::new(self.hold_closed, self.cpu) {
                 Ok(reset) => *self = reset,
                 Err(e) => {
                     eprintln!("{e}");
@@ -188,9 +254,10 @@ impl Application for FluidDemo {
     }
     fn title(&self) -> String {
         format!(
-            "3D Fluid | {} particles | {:.2}s | gate {} | {} | O: gate · Space: pause · R: reset",
+            "3D Fluid ({}) | {} particles | {:.2}s | gate {} | {} | O: gate · Space: pause · R: reset",
+            if self.cpu { "CPU" } else { "GPU" },
             self.fluid.particle_count(),
-            self.fluid.time(),
+            self.time,
             if self.gate_open { "open" } else { "closed" },
             if self.paused { "PAUSED" } else { "running" }
         )
@@ -198,15 +265,17 @@ impl Application for FluidDemo {
 }
 fn main() -> EngineResult<()> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    let cpu = args.iter().any(|a| a == "--cpu");
+    args.retain(|a| a != "--cpu");
     let closed = args.iter().any(|a| a == "--closed");
     args.retain(|a| a != "--closed");
     if args.iter().any(|a| a == "--help") {
         println!(
-            "3D fluid board: [--closed] [--headless output.png seconds | --frames count]\nThe gate opens after one simulated second unless --closed is set.\nO: open/close gate | Space: pause | R: reset | [/]: speed | WASD/QE + RMB: camera"
+            "3D fluid board: [--cpu] [--closed] [--headless output.png seconds | --frames count]\nGPU compute is the default; --cpu selects the reference solver.\nThe gate opens after one simulated second unless --closed is set.\nO: open/close gate | Space: pause | R: reset | [/]: speed | WASD/QE + RMB: camera"
         );
         return Ok(());
     }
-    let mut demo = FluidDemo::new(closed)?;
+    let mut demo = FluidDemo::new(closed, cpu)?;
     match args.as_slice() {
         [] => app::run(demo, AppConfig::default()),
         [flag, count] if flag == "--frames" => app::run(
@@ -221,18 +290,39 @@ fn main() -> EngineResult<()> {
             if !seconds.is_finite() || !(0.0..=60.0).contains(&seconds) {
                 return Err("capture time must be in 0..=60 seconds".into());
             }
-            for _ in 0..(seconds / f64::from(FIXED_DT)).round() as usize {
+            let gpu = pollster::block_on(Gpu::headless())?;
+            demo.prepare_render(&gpu)?;
+            let started = std::time::Instant::now();
+            for frame in 0..(seconds / f64::from(FIXED_DT)).round() as usize {
                 demo.step();
+                // Match a 60 Hz frame: two simulation steps plus one reconstruction.
+                if frame % 2 == 1 {
+                    demo.refresh()?;
+                    demo.prepare_render(&gpu)?;
+                }
             }
             demo.refresh()?;
+            demo.prepare_render(&gpu)?;
+            let positions = if cpu {
+                demo.fluid.positions().to_vec()
+            } else {
+                let status = demo.demo.scene.gpu_fluids[0].readback(&gpu)?;
+                println!(
+                    "GPU surface: {} vertices, overflow={}, outside domain={}",
+                    status.vertex_count, status.surface_overflow, status.outside_surface_domain
+                );
+                status.positions
+            };
             println!(
-                "Simulated {:.3}s, {} particles, nominal volume {:.3} m3, {} particles below the board",
-                demo.fluid.time(),
-                demo.fluid.particle_count(),
+                "{}: simulated {:.3}s in {:.3}s, {} particles, nominal volume {:.3} m3, {} particles below the board",
+                if cpu { "CPU" } else { "GPU" },
+                demo.time,
+                started.elapsed().as_secs_f64(),
+                positions.len(),
                 demo.fluid.volume(),
-                demo.fluid.positions().iter().filter(|p| p.y < 1.4).count()
+                positions.iter().filter(|p| p.y < 1.4).count()
             );
-            support::snapshot(&demo.demo.scene, Path::new(path))
+            support::snapshot_with_gpu(&gpu, &demo.demo.scene, Path::new(path))
         }
         _ => Err("invalid arguments; use --help".into()),
     }

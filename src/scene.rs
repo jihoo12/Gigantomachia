@@ -1,4 +1,4 @@
-//! Renderable scene data. No window, GPU, or demo controls are stored here.
+//! Renderable scene data. May share GPU fluid handles; no window or demo controls are stored here.
 
 use crate::{camera::Camera, mesh::Mesh, render::EngineResult, terrain::OceanSurface};
 use glam::{Mat4, Vec3};
@@ -12,6 +12,8 @@ pub struct Scene {
     pub ocean: Option<OceanSurface>,
     /// Reconstructed surfaces from independent Fluid objects.
     pub fluids: Vec<crate::fluid::FluidSurface>,
+    /// GPU-resident simulations, created on the renderer device.
+    pub gpu_fluids: Vec<Arc<crate::fluid::GpuFluid>>,
     pub sun: Sun,
 }
 

@@ -59,6 +59,7 @@ fn water_animation_flat_surface_and_resize() -> EngineResult<()> {
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         ocean: Some(Water::default()),
         ..Default::default()
     };
@@ -109,6 +110,7 @@ fn island_scene_shares_geometry_updates_transforms_and_releases_assets() -> Engi
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(34.0, 24.0, 42.0), Vec3::new(0.0, 4.0, -12.0))?,
         sun: Default::default(),
         meshes: vec![],
@@ -194,6 +196,7 @@ fn opaque_meshes_and_water_share_depth() -> EngineResult<()> {
     object.set_transform(Mat4::from_translation(Vec3::Y * 2.0))?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 12.0, 12.0), Vec3::ZERO)?,
         sun: Default::default(),
         meshes: vec![object],
@@ -243,6 +246,7 @@ fn directional_shadows_darken_mesh_and_water_receivers() -> EngineResult<()> {
     caster.set_transform(Mat4::from_translation(Vec3::Y * 5.0))?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(12.0, 14.0, 20.0), Vec3::ZERO)?,
         meshes: vec![ground, caster],
         ..Default::default()
@@ -303,6 +307,7 @@ fn refraction_transmits_shallows_distorts_and_absorbs_with_depth() -> EngineResu
     bottom.set_transform(Mat4::from_translation(-Vec3::Y * 0.5))?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 10.0, 14.0), Vec3::ZERO)?,
         meshes: vec![bottom],
         ocean: Some(Water {
@@ -375,6 +380,7 @@ fn foam_tracks_shallow_depth_without_covering_dry_land_or_open_ocean() -> Engine
     beach.set_transform(Mat4::from_translation(-Vec3::Y))?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 10.0, 14.0), Vec3::ZERO)?,
         meshes: vec![beach],
         ocean: Some(Water {
@@ -432,6 +438,7 @@ fn imported_fbx_uses_standard_mesh_rendering() -> EngineResult<()> {
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(9.0, 7.0, 12.0), Vec3::new(0.5, 2.0, 0.0))?,
         ..Default::default()
     };
@@ -466,6 +473,7 @@ fn animated_fbx_changes_geometry_and_shadows_without_reuploading_meshes() -> Eng
     let ground = MeshInstance::new(plane(12.0, 0.0, [0.5; 3])?);
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(10.0, 9.0, 14.0), Vec3::new(0.0, 1.5, 0.0))?,
         ..Default::default()
     };
@@ -519,6 +527,7 @@ fn realistic_water_toggle_detail_roughness_flat_surface_and_resize() -> EngineRe
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         ocean: Some(Water {
             time: 1.25,
             ..Default::default()
@@ -609,6 +618,7 @@ fn bounded_water_stays_on_its_board_when_camera_moves() -> EngineResult<()> {
     board.set_transform(Mat4::from_translation(Vec3::Y))?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         meshes: vec![board],
         ..Default::default()
     };
@@ -686,6 +696,7 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
     )?));
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 4.0, 8.0), Vec3::ZERO)?,
         meshes: vec![object],
         ocean: Some(Water {
@@ -760,6 +771,7 @@ fn waterfall_animates_with_water_clock_and_preserves_mesh_cache() -> EngineResul
     let spill = Waterfall::new(Vec3::new(0.0, 1.5, 0.0), glam::Vec2::Y, 1.5, 1.47)?;
     let mut scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(3.0, 3.5, 6.0), Vec3::new(0.0, 0.7, 0.0))?,
         meshes: vec![MeshInstance::new(plane(8.0, 0.0, [0.25; 3])?)],
         ocean: Some(Water {

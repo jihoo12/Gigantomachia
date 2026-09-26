@@ -84,6 +84,17 @@ impl FluidPass {
             }
         }
     }
+    pub fn encode_gpu(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        fluids: &[std::sync::Arc<crate::fluid::GpuFluid>],
+    ) {
+        pass.set_pipeline(&self.pipeline);
+        for fluid in fluids {
+            pass.set_vertex_buffer(0, fluid.vertices.slice(..));
+            pass.draw_indirect(&fluid.indirect, 0);
+        }
+    }
     pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
         for surface in &self.surfaces {

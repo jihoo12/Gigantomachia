@@ -1,6 +1,6 @@
 # Engine Design
 
-Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface (camera-following ocean or fixed rectangle) with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Water supports selectable stylized and realistic surface shading; the latter uses a lazily allocated denser grid, analytic per-fragment normals, filtered irregular flowing ripples, and GGX sunlight. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. Finite 3D fluids use a separate CPU particle solver with box collisions. There is no editor, ECS, general rigid-body physics system, or render graph yet.
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface (camera-following ocean or fixed rectangle) with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Water supports selectable stylized and realistic surface shading; the latter uses a lazily allocated denser grid, analytic per-fragment normals, filtered irregular flowing ripples, and GGX sunlight. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. Finite 3D fluids use a separate GPU compute particle solver (with a CPU reference backend) with box collisions. There is no editor, ECS, general rigid-body physics system, or render graph yet.
 
 ## Application, Scene, and Renderer
 
@@ -9,7 +9,7 @@ examples/water.rs, examples/island.rs, or examples/fbx.rs
     builds Scene + implements Application through example support
                          |
                   app::run(application, config)
-                  window lifecycle + Input + update
+                  window lifecycle + Input + update + prepare_render
                          |
                   Renderer::render(gpu, target, scene)
                   shadow map → opaque HDR color/depth
@@ -19,11 +19,12 @@ examples/water.rs, examples/island.rs, or examples/fbx.rs
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| `Application` implementation | Scene construction, controls, animation, reset behavior, window title | GPU buffers, pipelines, surfaces |
+| `Application` implementation | Scene construction, controls, animation, reset behavior, shared GPU fluid handles | Window surfaces, rendering pipelines |
 | `app` / `input` | Event loop, window/surface lifecycle, elapsed time, input state | Wave playback policy, island generation, camera key bindings |
-| `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, sunlight, water parameters | Window or GPU handles |
+| `scene` / `mesh` / `water` | Camera, immutable shared geometry, per-instance transforms, sunlight, water parameters, shared GPU fluid handles | Window lifecycle or GPU allocation policy |
 | `render` | Device setup, frame uniforms, shadow/HDR/depth targets, pipelines, mesh cache, submission, readback | Keyboard handling, demo state, procedural terrain algorithms |
 | `asset` | FBX parsing, coordinate conversion, CPU meshes, rigid animation sampling, import diagnostics | GPU uploads, texture decoding, playback clocks, skeletal deformation |
+| `fluid` | CPU reference solver, GPU simulation/reconstruction resources and compute submissions | Camera controls, window lifecycle |
 | `terrain` | Seeded island heightfield and CPU mesh generation | Special terrain rendering code |
 | `examples/support` | Shared demo navigation, CLI, PNG encoding | Engine render passes |
 
@@ -31,7 +32,7 @@ The modules remain in one library crate. Separate crates, a general-purpose mate
 
 ## Ocean Terrain and Fluid Objects
 
-`Scene::ocean` holds the authored `terrain::OceanSurface`; it replaces the former `Scene::water` name. `Scene::fluids` contains reconstructed surfaces from independently owned `fluid::Fluid` simulation objects. Ocean shading does not simulate or conserve a finite volume. Fluids advance only when application code calls the fixed-step solver with explicit colliders; see the [3D fluid guide](fluid.md).
+`Scene::ocean` holds the authored `terrain::OceanSurface`; it replaces the former `Scene::water` name. `Scene::gpu_fluids` shares GPU-resident simulation handles. `Scene::fluids` contains CPU-reconstructed surfaces from independently owned `fluid::Fluid` simulation objects. Ocean shading does not simulate or conserve a finite volume. Fluids advance only when application code calls the fixed-step solver with explicit colliders; see the [3D fluid guide](fluid.md).
 
 ## Public API
 
@@ -78,14 +79,15 @@ Rigid FBX clips are sampled through `AnimatedFbx` using an application-owned clo
 - The renderer uploads each distinct mesh once while it remains referenced by the current scene. Multiple instances reuse the same GPU geometry and have separate transform uniforms.
 - Mesh assets absent from the next rendered scene are evicted; instance uniform slots are resized to the current instance count. Removing and later re-adding a mesh uploads it again.
 - Frame resources belong to `Renderer`: a 2048² shadow depth map, opaque HDR color/depth, separate composite HDR color/water depth, and mirrored reflection HDR color/depth. The water depth attachment receives a copy of opaque depth, while the original stays read-only for refraction/foam. Size-dependent targets and all their sampling bindings are recreated together on resize. Passes encode draw calls; only the renderer submits the frame command buffer.
-- Suspend drops window/GPU resources but preserves application-owned CPU scene data. Resume recreates resources and uploads geometry as needed.
+- Suspend calls `Application::release_gpu` before dropping window/GPU resources, preserving CPU scene data. Applications must release device-specific handles here. The fluid board restarts from its CPU seed on resume.
 
 This is a small forward renderer: no GPU instancing, visibility culling, batching, asynchronous asset streaming, or multi-scene cache is implemented yet.
 
 ## Lifecycle and Timing
 
-`Input events → Application::update → Renderer::render → present`
+`Input events → Application::update → Application::prepare_render → Renderer::render → present`
 
+- `prepare_render` receives the rendering device for engine compute work. GPU fluids enqueue simulation and reconstruction without CPU readback; the renderer consumes their vertex and indirect buffers on the same queue.
 - Updates receive elapsed time capped at 100 ms. The host has no game simulation or wave clock. The examples accumulate `Water::time` using their own speed/pause state.
 - Held keys persist; press transitions and accumulated mouse motion are consumed once per update. Quick press/release taps survive until that update. Focus loss clears input.
 - Camera movement is reusable and unconstrained. Sea-level/terrain clearance is a demo policy in `examples/support`.

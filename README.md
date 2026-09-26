@@ -2,7 +2,7 @@
 
 A draft of a small 3D engine for building games entirely in code, without a GUI editor.
 
-The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. Planar reflections show above-water meshes in the water. An optional realistic water style adds denser geometry, per-pixel wave normals, flowing irregular ripples, and GGX sunlight. The island has an irregular coastline, sandy beaches, grass, and rock colors. Finite 3D fluid objects now use a separate CPU particle simulation with gravity, density constraints, box collisions, and reconstructed surfaces. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
+The engine now renders **water and a procedural island** through a shared scene renderer. The ocean uses Gerstner waves, analytic normals, sky reflections, Fresnel reflectance, screen-space refraction, depth absorption, and animated shoreline foam. Directional shadow maps shade both land and water. Planar reflections show above-water meshes in the water. An optional realistic water style adds denser geometry, per-pixel wave normals, flowing irregular ripples, and GGX sunlight. The island has an irregular coastline, sandy beaches, grass, and rock colors. Finite 3D fluid objects now use a separate GPU compute particle simulation with gravity, density constraints, box collisions, and GPU-reconstructed surfaces; a CPU reference path remains available. No external assets or GUI editor are required. ASCII/binary FBX meshes and rigid node animation can also be loaded through the engine asset API; ECS remains future work.
 
 ## Technology Choices
 
@@ -25,7 +25,7 @@ nix develop path:.
 cargo run --release --example island
 # Enable more detailed water shading (press 4 to compare styles).
 cargo run --release --example water -- --realistic-water
-# Simulated finite water: the front gate opens and the fluid drains under gravity.
+# GPU-simulated finite water: the front gate opens and the fluid drains under gravity.
 cargo run --release --example water_board
 # The original ocean-only scene is still available.
 cargo run --release --example water
@@ -79,6 +79,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 # Opt-in test: requires a Vulkan adapter, but no display server.
 cargo test --test rendering -- --ignored
+cargo test --release --test gpu_fluid -- --ignored --test-threads=1
 vulkaninfo --summary
 ```
 
@@ -121,7 +122,7 @@ docs/water.md          Water model and limitations
 docs/island.md         Island generation and limitations
 ```
 
-See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), [island notes](docs/island.md), [FBX import guide](docs/fbx.md), [animation guide](docs/animation.md), [falling-water effect guide](docs/waterfall.md), and [3D fluid guide](docs/fluid.md). The renderer owns GPU resources and frame submission; examples only provide scene data and application behavior.
+See the [engine design and API guide](docs/design.md), [water notes](docs/water.md), [island notes](docs/island.md), [FBX import guide](docs/fbx.md), [animation guide](docs/animation.md), [falling-water effect guide](docs/waterfall.md), and [3D fluid guide](docs/fluid.md). The renderer owns frame resources and rendering submission. Applications provide scene data and behavior, and can enqueue engine GPU fluid simulation through `Application::prepare_render`.
 
 Project documentation is written in English. Completed work is validated and committed to Git.
 

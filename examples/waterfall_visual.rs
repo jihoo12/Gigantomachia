@@ -103,6 +103,7 @@ fn main() -> EngineResult<()> {
     )?);
     let scene = Scene {
         fluids: Vec::new(),
+        gpu_fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(6.5, 5.5, 7.5), Vec3::new(0.0, 1.1, 0.0))?,
         meshes,
         sun: Sun {

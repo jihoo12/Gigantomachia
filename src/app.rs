@@ -21,10 +21,18 @@ pub enum AppAction {
     Exit,
 }
 
-/// Game code supplies CPU-side scene data and behavior; it never manages a surface or render pass.
+/// Game code supplies scene data and behavior, with an optional engine GPU simulation hook.
+/// The host owns the window surface and render passes.
 pub trait Application {
     fn scene(&self) -> &Scene;
     fn update(&mut self, input: &Input, dt: f32) -> AppAction;
+    /// Enqueue GPU simulation work on the rendering device before drawing.
+    /// Called after update; never wait for readback here. Recreate resources if the device changes.
+    fn prepare_render(&mut self, _gpu: &Gpu) -> EngineResult<()> {
+        Ok(())
+    }
+    /// Called when the host drops its rendering device.
+    fn release_gpu(&mut self) {}
     fn title(&self) -> String {
         "Gigantomachia".into()
     }
@@ -154,6 +162,10 @@ impl<A: Application> Host<A> {
             event_loop.exit();
             return;
         }
+        if let Err(error) = self.application.prepare_render(&state.gpu) {
+            self.fail(event_loop, error);
+            return;
+        }
         let title = self.application.title();
         if title != state.title {
             state.window.set_title(&title);
@@ -199,6 +211,7 @@ impl<A: Application> ApplicationHandler for Host<A> {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.application.release_gpu();
         self.state = None;
         self.input.clear();
     }

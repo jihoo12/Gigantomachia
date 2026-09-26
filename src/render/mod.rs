@@ -544,7 +544,7 @@ impl Renderer {
             self.targets.composite_color.as_image_copy(),
             extent,
         );
-        if scene.ocean.is_some() || !scene.fluids.is_empty() {
+        if scene.ocean.is_some() || !scene.fluids.is_empty() || !scene.gpu_fluids.is_empty() {
             encoder.copy_texture_to_texture(
                 self.targets.opaque_depth.as_image_copy(),
                 self.targets.water_depth.as_image_copy(),
@@ -579,6 +579,9 @@ impl Renderer {
             }
             if !scene.fluids.is_empty() {
                 self.fluids.encode(&mut pass);
+            }
+            if !scene.gpu_fluids.is_empty() {
+                self.fluids.encode_gpu(&mut pass, &scene.gpu_fluids);
             }
             if water.waterfall.is_some() {
                 self.waterfall.encode(&mut pass);

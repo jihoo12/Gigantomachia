@@ -188,12 +188,16 @@ impl Application for Demo {
 
 pub fn snapshot(scene: &Scene, path: &Path) -> EngineResult<()> {
     let gpu = pollster::block_on(Gpu::headless())?;
+    snapshot_with_gpu(&gpu, scene, path)
+}
+
+pub fn snapshot_with_gpu(gpu: &Gpu, scene: &Scene, path: &Path) -> EngineResult<()> {
     gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let (width, height) = (1280, 720);
-    let target = OffscreenTarget::new(&gpu, width, height)?;
-    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, width, height)?;
-    renderer.render(&gpu, &target.view(), scene);
-    let pixels = target.read_rgba8(&gpu)?;
+    let target = OffscreenTarget::new(gpu, width, height)?;
+    let mut renderer = Renderer::new(gpu, OffscreenTarget::FORMAT, width, height)?;
+    renderer.render(gpu, &target.view(), scene);
+    let pixels = target.read_rgba8(gpu)?;
     if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
         return Err(error.into());
     }

@@ -1,7 +1,9 @@
-//! Small CPU position-based fluid solver, independent of ocean rendering and GPU resources.
+//! Position-based fluid simulation: CPU reference and GPU-resident compute backends.
+mod gpu;
 mod surface;
 use crate::render::EngineResult;
 use glam::{IVec3, Vec3};
+pub use gpu::{GpuFluid, GpuFluidSnapshot};
 use std::collections::HashMap;
 pub use surface::FluidSurface;
 
