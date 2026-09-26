@@ -28,16 +28,20 @@ fn state(x:i32,y:i32)->vec4<f32>{return src[idx(u32(clamp(x,0,i32(W)-1)),u32(cla
  // own grid, depth is the physical nominal depth and velocity is gravity-driven
  // toward the lip; unlike the old pulse this transfers persistent mass + momentum.
  let lip_rel=world-p.source.xy;
- let incoming_flux=max(p.outlet.w,0.0)*sqrt(2.0*9.81*max(p.outlet.w,0.001));
+ let producer=select(0.0,1.0,p.outlet.w<0.0);
+ let nominal_depth=abs(p.outlet.w);
+ let incoming_flux=nominal_depth*sqrt(2.0*9.81*max(nominal_depth,0.001));
  let transfer=injection*incoming_flux;
  // Inject momentum, not water volume.  A tiny zero-mean pulse excites ripples
  // without steadily raising the simulated surface.
- vel+=p.direction.xy*transfer*5.5*dt;
- h+=transfer*0.16*dt;
+ // Producer (upper) domain accelerates toward the open lip and loses height.
+ // Receiver domain gains the same directed momentum and surface volume.
+ vel+=p.direction.xy*transfer*mix(5.5,3.4,producer)*dt;
+ h+=transfer*mix(0.16,-0.13,producer)*dt;
  // Drain the same transferred volume over a wider wake so the finite lower domain
  // does not accumulate water indefinitely.
  let wake=exp(-dot(lip_rel-p.direction.xy*0.55,lip_rel-p.direction.xy*0.55)/max(p.source.z*p.source.z*3.5,0.04));
- h-=wake*transfer*0.11*dt;
+ h-=wake*transfer*0.11*dt*(1.0-producer);
 
  let back=world-vel*dt;
  let buv=(back-(p.bounds.xy-p.bounds.zw))/(p.bounds.zw*2.0);
