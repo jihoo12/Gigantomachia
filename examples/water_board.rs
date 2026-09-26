@@ -3,6 +3,7 @@ mod support;
 
 use gigantomachia::{
     camera::Camera,
+    fluid::{Aabb, FluidCollider, FluidEmitter, FluidWorld},
     mesh::{Mesh, Vertex},
     render::EngineResult,
     scene::{MeshInstance, Scene, Sun},
@@ -117,9 +118,19 @@ fn main() -> EngineResult<()> {
         Vec3::new(0.3, 0.55, 0.3),
         [0.035, 0.28, 0.65],
     )?);
+    let mut fluid = FluidWorld::default();
+    fluid.add_collider(FluidCollider::cuboid(Vec3::new(0.0, 1.0, 0.0), Vec3::new(4.0, 0.22, 2.5))?);
+    for x in [-3.91, 3.91] { fluid.add_collider(FluidCollider::cuboid(Vec3::new(x, 1.55, 0.0), Vec3::new(0.09, 0.33, 2.5))?); }
+    fluid.add_collider(FluidCollider::cuboid(Vec3::new(0.0, 1.55, -2.41), Vec3::new(3.82, 0.33, 0.09))?);
+    for x in [-2.31, 2.31] { fluid.add_collider(FluidCollider::cuboid(Vec3::new(x, 1.55, 2.41), Vec3::new(1.51, 0.33, 0.09))?); }
+    fluid.add_collider(FluidCollider::cuboid(Vec3::new(0.0, 0.055, 5.25), Vec3::new(2.35, 0.055, 3.15))?);
+    for x in [-2.30, 2.30] { fluid.add_collider(FluidCollider::cuboid(Vec3::new(x, 0.34, 5.25), Vec3::new(0.08, 0.34, 3.15))?); }
+    fluid.add_emitter(FluidEmitter::new(Aabb::new(Vec3::new(0.0, 1.58, -1.55), Vec3::new(0.40, 0.12, 0.20))?, Vec3::new(0.0, 0.0, 0.72), 900.0)?);
+
     let scene = Scene {
         camera: Camera::looking_at(Vec3::new(6.5, 5.5, 7.5), Vec3::new(0.0, 1.1, 0.0))?,
         meshes,
+        fluid: Some(fluid),
         sun: Sun {
             direction: Vec3::new(-0.6, 0.65, -0.7),
             ..Default::default()
