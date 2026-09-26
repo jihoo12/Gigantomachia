@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 pub(super) const FLOW_W: u32 = 64;
 pub(super) const FLOW_H: u32 = 128;
 #[repr(C)] #[derive(Clone, Copy, Pod, Zeroable)]
-struct FlowParams { bounds:[f32;4], source:[f32;4], direction:[f32;4], upper:[f32;4], outlet:[f32;4] }
+struct FlowParams { bounds:[f32;4], source:[f32;4], direction:[f32;4], upper:[f32;4], outlet:[f32;4], inflow:[f32;4] }
 pub(super) struct FluidSimulation { pipeline:wgpu::ComputePipeline, bind_groups:[wgpu::BindGroup;2], upper_bind_groups:[wgpu::BindGroup;2], params:wgpu::Buffer, upper_params:wgpu::Buffer, current:usize, upper_current:usize }
 impl FluidSimulation {
  pub fn layout(gpu:&Gpu)->wgpu::BindGroupLayout { gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:Some("water-flow-layout"),entries:&[
@@ -44,6 +44,7 @@ impl FluidSimulation {
    upper:[upper_bounds.center.x,upper_bounds.center.y,upper_bounds.half_extent.x,upper_bounds.half_extent.y],
    // outlet.xy is the physical lip; z is half-width and w is nominal depth.
    outlet:[fall.origin.x,fall.origin.z,(fall.width*0.5).max(0.025),0.055],
+   inflow:[0.0,0.0,0.0,0.0],
   };
   let upper_p=FlowParams{
    bounds:p.upper,
@@ -53,6 +54,14 @@ impl FluidSimulation {
    // Negative w marks the producer domain: cells near the lip are accelerated
    // outward and drained, producing an actual simulated boundary outflow.
    outlet:[fall.origin.x,fall.origin.z,(fall.width*0.5).max(0.025),-0.055],
+   // Feed water from the opposite side of the board. xyz = source position/radius,
+   // w = target shallow-water depth supplied per second.
+   inflow:[
+    upper_bounds.center.x-dir.x*upper_bounds.half_extent.x*0.72,
+    upper_bounds.center.y-dir.y*upper_bounds.half_extent.y*0.72,
+    (fall.width*1.25).max(0.45),
+    0.060,
+   ],
   };
   gpu.queue.write_buffer(&self.params,0,bytemuck::bytes_of(&p));
   gpu.queue.write_buffer(&self.upper_params,0,bytemuck::bytes_of(&upper_p));
