@@ -45,14 +45,13 @@ fn fbm(p0: vec2<f32>) -> f32 {
 @group(1) @binding(2) var opaque_depth: texture_depth_2d;
 @group(1) @binding(3) var reflection_color: texture_2d<f32>;
 
-// Shared receiving-domain fluid state.  The spill samples the same velocity/height
-// field that the lower water surface renders instead of inventing four visual lobes.
+// Shared producer-domain fluid state. The spill samples the upper water domain at the lip.
 const FLOW_W: u32 = 64u;
 const FLOW_H: u32 = 128u;
 @group(2) @binding(0) var<storage, read> flow_state: array<vec4<f32>>;
 
 fn spill_flow_sample(world: vec2<f32>) -> vec4<f32> {
-    let b = scene.secondary_bounds;
+    let b = scene.water_bounds;
     let uv = clamp((world - (b.xy - b.zw)) / (b.zw * 2.0), vec2<f32>(0.0), vec2<f32>(1.0));
     let x = u32(uv.x * f32(FLOW_W - 1u));
     let y = u32(uv.y * f32(FLOW_H - 1u));
