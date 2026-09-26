@@ -69,4 +69,9 @@ impl ParticleFluid {
   pass.set_pipeline(&self.pipeline);pass.set_bind_group(0,&self.groups[self.current],&[]);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);drop(pass);
   self.current^=1;
  }
+ pub fn encode<'a>(&'a self,pass:&mut wgpu::RenderPass<'a>){
+  pass.set_pipeline(&self.render_pipeline);
+  pass.set_bind_group(1,&self.render_groups[self.current],&[]);
+  pass.draw(0..PARTICLE_COUNT*6,0..1);
+ }
 }
