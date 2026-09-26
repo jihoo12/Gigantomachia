@@ -58,11 +58,12 @@ fn water_animation_flat_surface_and_resize() -> EngineResult<()> {
     let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
-        water: Some(Water::default()),
+        fluids: Vec::new(),
+        ocean: Some(Water::default()),
         ..Default::default()
     };
     let first = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().time = 1.25;
+    scene.ocean.as_mut().unwrap().time = 1.25;
     let second = frame(&gpu, &mut renderer, &target, &scene)?;
     let changed = first
         .as_chunks::<4>()
@@ -79,9 +80,9 @@ fn water_animation_flat_surface_and_resize() -> EngineResult<()> {
             .iter()
             .all(|pixel| pixel[3] == 255)
     );
-    scene.water.as_mut().unwrap().amplitude = 0.0;
+    scene.ocean.as_mut().unwrap().amplitude = 0.0;
     let flat = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().time = 3.0;
+    scene.ocean.as_mut().unwrap().time = 3.0;
     assert_eq!(flat, frame(&gpu, &mut renderer, &target, &scene)?);
     assert_ne!(flat, first);
     renderer.resize(&gpu, 0, 0)?;
@@ -107,10 +108,11 @@ fn island_scene_shares_geometry_updates_transforms_and_releases_assets() -> Engi
     let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(34.0, 24.0, 42.0), Vec3::new(0.0, 4.0, -12.0))?,
         sun: Default::default(),
         meshes: vec![],
-        water: Some(Water {
+        ocean: Some(Water {
             amplitude: 0.55,
             time: 1.25,
             ..Default::default()
@@ -151,7 +153,7 @@ fn island_scene_shares_geometry_updates_transforms_and_releases_assets() -> Engi
     scene.meshes.clear();
     assert_eq!(ocean, frame(&gpu, &mut renderer, &target, &scene)?);
     assert_eq!(renderer.resident_meshes(), 0);
-    scene.water = None;
+    scene.ocean = None;
     assert_ne!(
         ocean,
         frame(&gpu, &mut renderer, &target, &scene)?,
@@ -191,13 +193,14 @@ fn opaque_meshes_and_water_share_depth() -> EngineResult<()> {
     );
     object.set_transform(Mat4::from_translation(Vec3::Y * 2.0))?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 12.0, 12.0), Vec3::ZERO)?,
         sun: Default::default(),
         meshes: vec![object],
-        water: None,
+        ocean: None,
     };
     let land = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water = Some(Water {
+    scene.ocean = Some(Water {
         refraction: false,
         foam_strength: 0.0,
         amplitude: 0.0,
@@ -239,6 +242,7 @@ fn directional_shadows_darken_mesh_and_water_receivers() -> EngineResult<()> {
     let mut caster = MeshInstance::new(plane(3.0, 0.0, [0.4; 3])?);
     caster.set_transform(Mat4::from_translation(Vec3::Y * 5.0))?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(12.0, 14.0, 20.0), Vec3::ZERO)?,
         meshes: vec![ground, caster],
         ..Default::default()
@@ -261,7 +265,7 @@ fn directional_shadows_darken_mesh_and_water_receivers() -> EngineResult<()> {
         "the raised mesh must cast a shadow on the ground"
     );
     scene.meshes.remove(0);
-    scene.water = Some(Water {
+    scene.ocean = Some(Water {
         amplitude: 0.0,
         refraction: false,
         foam_strength: 0.0,
@@ -298,9 +302,10 @@ fn refraction_transmits_shallows_distorts_and_absorbs_with_depth() -> EngineResu
     let mut bottom = MeshInstance::new(plane(35.0, 0.0, [0.9, 0.15, 0.04])?);
     bottom.set_transform(Mat4::from_translation(-Vec3::Y * 0.5))?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 10.0, 14.0), Vec3::ZERO)?,
         meshes: vec![bottom],
-        water: Some(Water {
+        ocean: Some(Water {
             amplitude: 0.0,
             refraction: false,
             foam_strength: 0.0,
@@ -310,7 +315,7 @@ fn refraction_transmits_shallows_distorts_and_absorbs_with_depth() -> EngineResu
     };
     scene.sun.shadows = false;
     let opaque = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().refraction = true;
+    scene.ocean.as_mut().unwrap().refraction = true;
     let shallow = frame(&gpu, &mut renderer, &target, &scene)?;
     let center = (90 * 320 + 160) * 4;
     assert!(
@@ -327,10 +332,10 @@ fn refraction_transmits_shallows_distorts_and_absorbs_with_depth() -> EngineResu
     // A finite colored submerged patch provides edges that visibly move under refraction.
     scene.meshes[0].mesh = plane(4.0, 0.0, [0.9, 0.15, 0.04])?;
     scene.meshes[0].set_transform(Mat4::from_translation(-Vec3::Y * 2.0))?;
-    scene.water.as_mut().unwrap().amplitude = 0.6;
-    scene.water.as_mut().unwrap().refraction_strength = 0.0;
+    scene.ocean.as_mut().unwrap().amplitude = 0.6;
+    scene.ocean.as_mut().unwrap().refraction_strength = 0.0;
     let undistorted = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().refraction_strength = 1.0;
+    scene.ocean.as_mut().unwrap().refraction_strength = 1.0;
     let distorted = frame(&gpu, &mut renderer, &target, &scene)?;
     let changed = undistorted
         .as_chunks::<4>()
@@ -369,9 +374,10 @@ fn foam_tracks_shallow_depth_without_covering_dry_land_or_open_ocean() -> Engine
     let mut beach = MeshInstance::new(plane(12.0, 0.2, [0.5, 0.35, 0.16])?);
     beach.set_transform(Mat4::from_translation(-Vec3::Y))?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 10.0, 14.0), Vec3::ZERO)?,
         meshes: vec![beach],
-        water: Some(Water {
+        ocean: Some(Water {
             amplitude: 0.0,
             foam_strength: 0.0,
             ..Default::default()
@@ -380,7 +386,7 @@ fn foam_tracks_shallow_depth_without_covering_dry_land_or_open_ocean() -> Engine
     };
     scene.sun.shadows = false;
     let clear = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().foam_strength = 1.0;
+    scene.ocean.as_mut().unwrap().foam_strength = 1.0;
     let foamy = frame(&gpu, &mut renderer, &target, &scene)?;
     let shore = pixel_at(&scene.camera, Vec3::new(3.0, 0.0, 0.0), 320, 180);
     assert!(
@@ -395,7 +401,7 @@ fn foam_tracks_shallow_depth_without_covering_dry_land_or_open_ocean() -> Engine
             "deep water and dry land must not gain shoreline foam"
         );
     }
-    scene.water.as_mut().unwrap().time = 1.25;
+    scene.ocean.as_mut().unwrap().time = 1.25;
     assert_ne!(
         foamy,
         frame(&gpu, &mut renderer, &target, &scene)?,
@@ -403,7 +409,7 @@ fn foam_tracks_shallow_depth_without_covering_dry_land_or_open_ocean() -> Engine
     );
     scene.meshes.clear();
     let ocean = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().foam_strength = 0.0;
+    scene.ocean.as_mut().unwrap().foam_strength = 0.0;
     assert_eq!(
         ocean,
         frame(&gpu, &mut renderer, &target, &scene)?,
@@ -425,6 +431,7 @@ fn imported_fbx_uses_standard_mesh_rendering() -> EngineResult<()> {
     let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(9.0, 7.0, 12.0), Vec3::new(0.5, 2.0, 0.0))?,
         ..Default::default()
     };
@@ -458,6 +465,7 @@ fn animated_fbx_changes_geometry_and_shadows_without_reuploading_meshes() -> Eng
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let ground = MeshInstance::new(plane(12.0, 0.0, [0.5; 3])?);
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(10.0, 9.0, 14.0), Vec3::new(0.0, 1.5, 0.0))?,
         ..Default::default()
     };
@@ -510,14 +518,15 @@ fn realistic_water_toggle_detail_roughness_flat_surface_and_resize() -> EngineRe
     let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let mut scene = Scene {
-        water: Some(Water {
+        fluids: Vec::new(),
+        ocean: Some(Water {
             time: 1.25,
             ..Default::default()
         }),
         ..Default::default()
     };
     let original = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().style = WaterStyle::Realistic;
+    scene.ocean.as_mut().unwrap().style = WaterStyle::Realistic;
     let detailed = frame(&gpu, &mut renderer, &target, &scene)?;
     let changed = original
         .as_chunks::<4>()
@@ -531,44 +540,44 @@ fn realistic_water_toggle_detail_roughness_flat_surface_and_resize() -> EngineRe
         "the realistic style must visibly change the water"
     );
     assert!(detailed.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
-    scene.water.as_mut().unwrap().ripple_strength = 0.0;
+    scene.ocean.as_mut().unwrap().ripple_strength = 0.0;
     assert_ne!(detailed, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().ripple_strength = 1.0;
-    scene.water.as_mut().unwrap().roughness = 0.55;
+    scene.ocean.as_mut().unwrap().ripple_strength = 1.0;
+    scene.ocean.as_mut().unwrap().roughness = 0.55;
     assert_ne!(detailed, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().roughness = 0.22;
-    scene.water.as_mut().unwrap().time = 2.0;
+    scene.ocean.as_mut().unwrap().roughness = 0.22;
+    scene.ocean.as_mut().unwrap().time = 2.0;
     assert_ne!(detailed, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().time = 1.25;
-    scene.water.as_mut().unwrap().style = WaterStyle::Stylized;
+    scene.ocean.as_mut().unwrap().time = 1.25;
+    scene.ocean.as_mut().unwrap().style = WaterStyle::Stylized;
     assert_eq!(
         original,
         frame(&gpu, &mut renderer, &target, &scene)?,
         "style toggling must be reversible"
     );
-    scene.water.as_mut().unwrap().style = WaterStyle::Realistic;
-    scene.water.as_mut().unwrap().amplitude = 0.0;
+    scene.ocean.as_mut().unwrap().style = WaterStyle::Realistic;
+    scene.ocean.as_mut().unwrap().amplitude = 0.0;
     let flat = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().time = 8.0;
+    scene.ocean.as_mut().unwrap().time = 8.0;
     assert_eq!(
         flat,
         frame(&gpu, &mut renderer, &target, &scene)?,
         "zero amplitude must disable all surface waves"
     );
-    scene.water.as_mut().unwrap().amplitude = 1.0;
+    scene.ocean.as_mut().unwrap().amplitude = 1.0;
     // Exercise the existing effects with the detailed geometry and shading enabled.
     scene.camera = Camera::looking_at(Vec3::new(0.0, 10.0, 14.0), Vec3::ZERO)?;
     let mut beach = MeshInstance::new(plane(12.0, 0.2, [0.5, 0.35, 0.16])?);
     beach.set_transform(Mat4::from_translation(-Vec3::Y))?;
     scene.meshes.push(beach);
-    scene.water.as_mut().unwrap().amplitude = 0.0;
+    scene.ocean.as_mut().unwrap().amplitude = 0.0;
     let all_effects = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().refraction = false;
+    scene.ocean.as_mut().unwrap().refraction = false;
     assert_ne!(all_effects, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().refraction = true;
-    scene.water.as_mut().unwrap().foam_strength = 0.0;
+    scene.ocean.as_mut().unwrap().refraction = true;
+    scene.ocean.as_mut().unwrap().foam_strength = 0.0;
     assert_ne!(all_effects, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().foam_strength = 1.0;
+    scene.ocean.as_mut().unwrap().foam_strength = 1.0;
     let mut caster = MeshInstance::new(plane(2.0, 0.0, [0.4; 3])?);
     caster.set_transform(Mat4::from_translation(Vec3::Y * 4.0))?;
     scene.meshes.push(caster);
@@ -576,7 +585,7 @@ fn realistic_water_toggle_detail_roughness_flat_surface_and_resize() -> EngineRe
     let shadows = frame(&gpu, &mut renderer, &target, &scene)?;
     scene.sun.shadows = false;
     assert_ne!(shadows, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().amplitude = 1.0;
+    scene.ocean.as_mut().unwrap().amplitude = 1.0;
     renderer.resize(&gpu, 173, 257)?;
     let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
     let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
@@ -599,6 +608,7 @@ fn bounded_water_stays_on_its_board_when_camera_moves() -> EngineResult<()> {
     let mut board = MeshInstance::new(plane(12.0, 0.0, [0.65, 0.24, 0.06])?);
     board.set_transform(Mat4::from_translation(Vec3::Y))?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         meshes: vec![board],
         ..Default::default()
     };
@@ -614,10 +624,10 @@ fn bounded_water_stays_on_its_board_when_camera_moves() -> EngineResult<()> {
     };
     for camera in [Vec3::new(8.0, 8.0, 10.0), Vec3::new(-6.0, 9.0, 10.0)] {
         scene.camera = Camera::looking_at(camera, Vec3::new(2.0, 1.0, -1.0))?;
-        scene.water = None;
+        scene.ocean = None;
         let dry = frame(&gpu, &mut renderer, &target, &scene)?;
         for style in [WaterStyle::Stylized, WaterStyle::Realistic] {
-            scene.water = Some(Water { style, ..water });
+            scene.ocean = Some(Water { style, ..water });
             let wet = frame(&gpu, &mut renderer, &target, &scene)?;
             let center = pixel_at(&scene.camera, Vec3::new(2.0, 1.4, -1.0), 320, 180);
             assert_ne!(
@@ -637,7 +647,7 @@ fn bounded_water_stays_on_its_board_when_camera_moves() -> EngineResult<()> {
                     "water must not extend outside its fixed rectangle"
                 );
             }
-            scene.water.as_mut().unwrap().refraction = false;
+            scene.ocean.as_mut().unwrap().refraction = false;
             assert_ne!(
                 wet,
                 frame(&gpu, &mut renderer, &target, &scene)?,
@@ -675,9 +685,10 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
         vec![0, 1, 2, 0, 2, 3],
     )?));
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(0.0, 4.0, 8.0), Vec3::ZERO)?,
         meshes: vec![object],
-        water: Some(Water {
+        ocean: Some(Water {
             amplitude: 0.0,
             refraction: false,
             foam_strength: 0.0,
@@ -689,7 +700,7 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
     scene.sun.shadows = false;
     scene.sun.direction = Vec3::new(0.0, 1.0, 1.0);
     let without = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().reflections = true;
+    scene.ocean.as_mut().unwrap().reflections = true;
     let mirrored = frame(&gpu, &mut renderer, &target, &scene)?;
     let pixel = pixel_at(&scene.camera, Vec3::new(0.0, -2.0, 0.0), 320, 180);
     assert!(
@@ -708,7 +719,7 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
     assert_eq!(renderer.resident_meshes(), 1);
     scene.meshes[0].set_transform(Mat4::from_translation(Vec3::Y * -4.0))?;
     let submerged = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().reflections = false;
+    scene.ocean.as_mut().unwrap().reflections = false;
     assert_eq!(
         submerged,
         frame(&gpu, &mut renderer, &target, &scene)?,
@@ -716,9 +727,9 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
     );
     // Use an elevated mean plane and realistic shading after resizing.
     scene.meshes[0].set_transform(Mat4::from_translation(Vec3::Y * 1.0))?;
-    scene.water.as_mut().unwrap().level = 1.0;
-    scene.water.as_mut().unwrap().style = gigantomachia::water::WaterStyle::Realistic;
-    scene.water.as_mut().unwrap().reflections = true;
+    scene.ocean.as_mut().unwrap().level = 1.0;
+    scene.ocean.as_mut().unwrap().style = gigantomachia::water::WaterStyle::Realistic;
+    scene.ocean.as_mut().unwrap().reflections = true;
     renderer.resize(&gpu, 173, 257)?;
     let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
     let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
@@ -726,7 +737,7 @@ fn planar_reflections_mirror_above_water_meshes_clip_submerged_and_resize() -> E
     assert_eq!(resized, frame(&gpu, &mut fresh, &portrait, &scene)?);
     scene.meshes.clear();
     let empty = frame(&gpu, &mut renderer, &portrait, &scene)?;
-    scene.water.as_mut().unwrap().reflections = false;
+    scene.ocean.as_mut().unwrap().reflections = false;
     assert_eq!(
         empty,
         frame(&gpu, &mut renderer, &portrait, &scene)?,
@@ -748,9 +759,10 @@ fn waterfall_animates_with_water_clock_and_preserves_mesh_cache() -> EngineResul
     let target = OffscreenTarget::new(&gpu, 320, 180)?;
     let spill = Waterfall::new(Vec3::new(0.0, 1.5, 0.0), glam::Vec2::Y, 1.5, 1.47)?;
     let mut scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(3.0, 3.5, 6.0), Vec3::new(0.0, 0.7, 0.0))?,
         meshes: vec![MeshInstance::new(plane(8.0, 0.0, [0.25; 3])?)],
-        water: Some(Water {
+        ocean: Some(Water {
             level: 1.5,
             amplitude: 0.0,
             foam_strength: 0.0,
@@ -763,7 +775,7 @@ fn waterfall_animates_with_water_clock_and_preserves_mesh_cache() -> EngineResul
         ..Default::default()
     };
     let still = frame(&gpu, &mut renderer, &target, &scene)?;
-    scene.water.as_mut().unwrap().waterfall = Some(spill);
+    scene.ocean.as_mut().unwrap().waterfall = Some(spill);
     let flow = frame(&gpu, &mut renderer, &target, &scene)?;
     let changed = still
         .as_chunks::<4>()
@@ -781,21 +793,69 @@ fn waterfall_animates_with_water_clock_and_preserves_mesh_cache() -> EngineResul
         frame(&gpu, &mut renderer, &target, &scene)?,
         "fixed time must freeze the entire spill"
     );
-    scene.water.as_mut().unwrap().time = 0.75;
+    scene.ocean.as_mut().unwrap().time = 0.75;
     assert_ne!(flow, frame(&gpu, &mut renderer, &target, &scene)?);
     assert_eq!(
         renderer.resident_meshes(),
         1,
         "procedural spill must not create CPU mesh assets per frame"
     );
-    scene.water.as_mut().unwrap().waterfall = None;
+    scene.ocean.as_mut().unwrap().waterfall = None;
     assert_eq!(still, frame(&gpu, &mut renderer, &target, &scene)?);
-    scene.water.as_mut().unwrap().waterfall = Some(spill);
+    scene.ocean.as_mut().unwrap().waterfall = Some(spill);
     renderer.resize(&gpu, 173, 257)?;
     let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
     let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
     let mut fresh = Renderer::new(&gpu, OffscreenTarget::FORMAT, 173, 257)?;
     assert_eq!(resized, frame(&gpu, &mut fresh, &portrait, &scene)?);
+    if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
+        return Err(error.into());
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a Vulkan adapter; run inside nix develop"]
+fn simulated_fluid_renders_without_an_ocean_and_updates_its_surface() -> EngineResult<()> {
+    use gigantomachia::fluid::Fluid;
+    let gpu = pollster::block_on(Gpu::headless())?;
+    gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut renderer = Renderer::new(&gpu, OffscreenTarget::FORMAT, 320, 180)?;
+    let target = OffscreenTarget::new(&gpu, 320, 180)?;
+    let mut fluid = Fluid::block(Vec3::new(-0.4, 1.5, -0.4), [6, 5, 6], 0.16)?;
+    let mut scene = Scene {
+        camera: Camera::looking_at(Vec3::new(3.0, 3.0, 5.0), Vec3::Y)?,
+        meshes: vec![MeshInstance::new(plane(8.0, 0.0, [0.3, 0.22, 0.1])?)],
+        ..Default::default()
+    };
+    let empty = frame(&gpu, &mut renderer, &target, &scene)?;
+    scene.fluids = vec![fluid.surface()?];
+    let first = frame(&gpu, &mut renderer, &target, &scene)?;
+    assert!(
+        empty
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(first.as_chunks::<4>().0)
+            .filter(|(a, b)| a != b)
+            .count()
+            > 150
+    );
+    assert_eq!(first, frame(&gpu, &mut renderer, &target, &scene)?);
+    for _ in 0..40 {
+        fluid.step(&[]);
+    }
+    scene.fluids[0] = fluid.surface()?;
+    assert_ne!(first, frame(&gpu, &mut renderer, &target, &scene)?);
+    assert_eq!(renderer.resident_meshes(), 1);
+    renderer.resize(&gpu, 173, 257)?;
+    let portrait = OffscreenTarget::new(&gpu, 173, 257)?;
+    let resized = frame(&gpu, &mut renderer, &portrait, &scene)?;
+    let mut fresh = Renderer::new(&gpu, OffscreenTarget::FORMAT, 173, 257)?;
+    assert_eq!(resized, frame(&gpu, &mut fresh, &portrait, &scene)?);
+    renderer.resize(&gpu, 320, 180)?;
+    scene.fluids.clear();
+    assert_eq!(empty, frame(&gpu, &mut renderer, &target, &scene)?);
     if let Some(error) = pollster::block_on(gpu.device.pop_error_scope()) {
         return Err(error.into());
     }

@@ -1,6 +1,6 @@
 # Engine Design
 
-Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface (camera-following ocean or fixed rectangle) with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Water supports selectable stylized and realistic surface shading; the latter uses a lazily allocated denser grid, analytic per-fragment normals, filtered irregular flowing ripples, and GGX sunlight. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. There is no editor, ECS, physics system, or render graph yet.
+Gigantomachia is a small, code-first 3D engine targeting Linux, Rust, and wgpu's Vulkan backend. It currently supports a perspective camera, vertex-colored opaque meshes, a procedural sky, and an optional water surface (camera-following ocean or fixed rectangle) with refraction, absorption, and shoreline foam. Directional shadows affect land and water. Water supports selectable stylized and realistic surface shading; the latter uses a lazily allocated denser grid, analytic per-fragment normals, filtered irregular flowing ripples, and GGX sunlight. ASCII/binary FBX import produces the same opaque meshes; rigid node animation updates their instance transforms. Finite 3D fluids use a separate CPU particle solver with box collisions. There is no editor, ECS, general rigid-body physics system, or render graph yet.
 
 ## Application, Scene, and Renderer
 
@@ -29,6 +29,10 @@ examples/water.rs, examples/island.rs, or examples/fbx.rs
 
 The modules remain in one library crate. Separate crates, a general-purpose material system, and an ECS can be introduced when independent consumers require them. Engine source never imports example code.
 
+## Ocean Terrain and Fluid Objects
+
+`Scene::ocean` holds the authored `terrain::OceanSurface`; it replaces the former `Scene::water` name. `Scene::fluids` contains reconstructed surfaces from independently owned `fluid::Fluid` simulation objects. Ocean shading does not simulate or conserve a finite volume. Fluids advance only when application code calls the fixed-step solver with explicit colliders; see the [3D fluid guide](fluid.md).
+
 ## Public API
 
 A minimal application can use the renderer without touching wgpu:
@@ -49,13 +53,13 @@ impl Application for Ocean {
 
     fn update(&mut self, input: &Input, dt: f32) -> AppAction {
         if input.pressed(KeyCode::Escape) { return AppAction::Exit; }
-        if let Some(water) = &mut self.scene.water { water.time += dt; }
+        if let Some(water) = &mut self.scene.ocean { water.time += dt; }
         AppAction::Continue
     }
 }
 
 fn main() -> EngineResult<()> {
-    let scene = Scene { water: Some(Water::default()), ..Default::default() };
+    let scene = Scene { ocean: Some(Water::default()), ..Default::default() };
     app::run(Ocean { scene }, AppConfig::default())
 }
 ```

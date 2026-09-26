@@ -87,7 +87,7 @@ impl Application for Demo {
             input.held(Key::ShiftLeft) || input.held(Key::ShiftRight),
         );
         // Example-specific clearance, not a physics/collision system.
-        if self.scene.water.is_some_and(|water| water.bounds.is_none()) || self.ground.is_some() {
+        if self.scene.ocean.is_some_and(|water| water.bounds.is_none()) || self.ground.is_some() {
             let position = &mut self.scene.camera.position;
             let floor = self
                 .ground
@@ -109,7 +109,7 @@ impl Application for Demo {
         if input.pressed(Key::BracketLeft) {
             self.speed = (self.speed - 0.1).max(0.0);
         }
-        if let Some(water) = &mut self.scene.water {
+        if let Some(water) = &mut self.scene.ocean {
             if input.pressed(Key::Digit5) {
                 water.reflections = !water.reflections;
             }
@@ -159,25 +159,25 @@ impl Application for Demo {
         format!(
             "Gigantomachia | {} | amplitude {:.1} | speed {:.1}{} | shadow {} · refraction {} · foam {} | water {} · reflections {}",
             self.name,
-            self.scene.water.map_or(0.0, |water| water.amplitude),
+            self.scene.ocean.map_or(0.0, |water| water.amplitude),
             self.speed,
             if self.paused { " | PAUSED" } else { "" },
             if self.scene.sun.shadows { "on" } else { "off" },
-            if self.scene.water.is_some_and(|w| w.refraction) {
+            if self.scene.ocean.is_some_and(|w| w.refraction) {
                 "on"
             } else {
                 "off"
             },
-            if self.scene.water.is_some_and(|w| w.foam_strength > 0.0) {
+            if self.scene.ocean.is_some_and(|w| w.foam_strength > 0.0) {
                 "on"
             } else {
                 "off"
             },
-            self.scene.water.map_or("none", |water| match water.style {
+            self.scene.ocean.map_or("none", |water| match water.style {
                 WaterStyle::Stylized => "stylized",
                 WaterStyle::Realistic => "realistic",
             }),
-            if self.scene.water.is_some_and(|w| w.reflections) {
+            if self.scene.ocean.is_some_and(|w| w.reflections) {
                 "on"
             } else {
                 "off"
@@ -186,7 +186,7 @@ impl Application for Demo {
     }
 }
 
-fn snapshot(scene: &Scene, path: &Path) -> EngineResult<()> {
+pub fn snapshot(scene: &Scene, path: &Path) -> EngineResult<()> {
     let gpu = pollster::block_on(Gpu::headless())?;
     gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
     let (width, height) = (1280, 720);
@@ -217,28 +217,28 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
     args.retain(|arg| {
         match arg.as_str() {
             "--realistic-water" => {
-                if let Some(water) = &mut demo.scene.water {
+                if let Some(water) = &mut demo.scene.ocean {
                     water.style = WaterStyle::Realistic;
                 }
             }
             "--no-waterfall" => {
-                if let Some(water) = &mut demo.scene.water {
+                if let Some(water) = &mut demo.scene.ocean {
                     water.waterfall = None;
                 }
             }
             "--no-reflections" => {
-                if let Some(water) = &mut demo.scene.water {
+                if let Some(water) = &mut demo.scene.ocean {
                     water.reflections = false;
                 }
             }
             "--no-shadows" => demo.scene.sun.shadows = false,
             "--no-refraction" => {
-                if let Some(water) = &mut demo.scene.water {
+                if let Some(water) = &mut demo.scene.ocean {
                     water.refraction = false;
                 }
             }
             "--no-foam" => {
-                if let Some(water) = &mut demo.scene.water {
+                if let Some(water) = &mut demo.scene.ocean {
                     water.foam_strength = 0.0;
                 }
             }
@@ -264,7 +264,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
             },
         ),
         [flag, path] if flag == "--headless" => {
-            if let Some(water) = &mut demo.scene.water {
+            if let Some(water) = &mut demo.scene.ocean {
                 water.time = 1.25;
             }
             demo.sample_animation(1.25)?;
@@ -275,7 +275,7 @@ pub fn run_with_args(mut demo: Demo, mut args: Vec<String>) -> EngineResult<()> 
             if !time.is_finite() || time < 0.0 {
                 return Err("snapshot time must be finite and nonnegative".into());
             }
-            if let Some(water) = &mut demo.scene.water {
+            if let Some(water) = &mut demo.scene.ocean {
                 water.time = time;
             }
             demo.sample_animation(f64::from(time))?;

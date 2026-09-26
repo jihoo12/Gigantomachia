@@ -1,6 +1,6 @@
 //! Renderable scene data. No window, GPU, or demo controls are stored here.
 
-use crate::{camera::Camera, mesh::Mesh, render::EngineResult, water::Water};
+use crate::{camera::Camera, mesh::Mesh, render::EngineResult, terrain::OceanSurface};
 use glam::{Mat4, Vec3};
 use std::sync::Arc;
 
@@ -8,7 +8,10 @@ use std::sync::Arc;
 pub struct Scene {
     pub camera: Camera,
     pub meshes: Vec<MeshInstance>,
-    pub water: Option<Water>,
+    /// Authored ocean/terrain surface; not a simulated fluid volume.
+    pub ocean: Option<OceanSurface>,
+    /// Reconstructed surfaces from independent Fluid objects.
+    pub fluids: Vec<crate::fluid::FluidSurface>,
     pub sun: Sun,
 }
 

@@ -1,12 +1,14 @@
-# Falling Water
+# Authored Falling-Water Effect
 
-The water-board example now has a gap in its front rim. A curved, translucent sheet spills through the opening, falls into a small receiving puddle, and produces impact foam, expanding ripples, and looping splash droplets.
+For finite water that drains according to gravity and collisions, use the [3D fluid solver](fluid.md) and the `water_board` example. This document describes the separate authored rendering effects.
+
+The authored `waterfall_visual` example has a gap in its front rim. A curved, translucent sheet spills through the opening, falls into a small receiving puddle, and produces impact foam, expanding ripples, and looping splash droplets.
 
 ```sh
 nix develop path:.
-cargo run --release --example water_board
-cargo run --example water_board -- --headless /tmp/waterfall.png 1.25
-cargo run --example water_board -- --no-waterfall --headless /tmp/no-waterfall.png 1.25
+cargo run --release --example waterfall_visual
+cargo run --example waterfall_visual -- --headless /tmp/waterfall.png 1.25
+cargo run --example waterfall_visual -- --no-waterfall --headless /tmp/no-waterfall.png 1.25
 ```
 
 Space pauses all water effects, `[` / `]` adjust playback speed, and R resets the scene. The spill uses `Water::time` alongside the existing surface. Headless captures accept an explicit time. `--no-waterfall` disables the sheet, puddle, and spray for comparison; it does not restore the closed rim.

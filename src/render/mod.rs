@@ -1,5 +1,6 @@
 //! Reusable forward renderer. Owns frame resources, draw order, and GPU mesh caching.
 
+mod fluid;
 mod gpu;
 mod mesh;
 mod offscreen;
@@ -42,6 +43,7 @@ struct FrameUniforms {
 pub struct Renderer {
     sky: wgpu::RenderPipeline,
     water: WaterPass,
+    fluids: fluid::FluidPass,
     waterfall: waterfall::WaterfallPass,
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
@@ -322,6 +324,7 @@ impl Renderer {
                 Some(false),
             ),
             waterfall: waterfall::WaterfallPass::new(gpu, &layout),
+            fluids: fluid::FluidPass::new(gpu, &layout, &water_layout),
             water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
@@ -363,14 +366,15 @@ impl Renderer {
     /// Sampled opaque depth is distinct from the water attachment to avoid read/write feedback.
     pub fn render(&mut self, gpu: &Gpu, target: &wgpu::TextureView, scene: &Scene) {
         self.meshes.prepare(gpu, &scene.meshes);
+        self.fluids.prepare(gpu, &scene.fluids);
         let camera = &scene.camera;
-        let water = scene.water.unwrap_or_default();
+        let water = scene.ocean.unwrap_or_default();
         let detailed = water.style == WaterStyle::Realistic;
-        self.water.prepare(gpu, scene.water.is_some() && detailed);
+        self.water.prepare(gpu, scene.ocean.is_some() && detailed);
         let sun = scene.sun.direction();
         let matrix = camera.view_projection(self.width as f32 / self.height as f32);
         let reflection_enabled =
-            scene.water.is_some() && water.reflections && camera.position.y > water.level;
+            scene.ocean.is_some() && water.reflections && camera.position.y > water.level;
         let mirror = Mat4::from_translation(Vec3::Y * (2.0 * water.level))
             * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0));
         let reflection_matrix = matrix * mirror;
@@ -540,7 +544,7 @@ impl Renderer {
             self.targets.composite_color.as_image_copy(),
             extent,
         );
-        if scene.water.is_some() {
+        if scene.ocean.is_some() || !scene.fluids.is_empty() {
             encoder.copy_texture_to_texture(
                 self.targets.opaque_depth.as_image_copy(),
                 self.targets.water_depth.as_image_copy(),
@@ -570,7 +574,12 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
-            self.water.encode(&mut pass, detailed);
+            if scene.ocean.is_some() {
+                self.water.encode(&mut pass, detailed);
+            }
+            if !scene.fluids.is_empty() {
+                self.fluids.encode(&mut pass);
+            }
             if water.waterfall.is_some() {
                 self.waterfall.encode(&mut pass);
             }

@@ -120,6 +120,9 @@ impl Island {
     }
 }
 
+/// Authored large-scale water terrain; does not contain or simulate a finite fluid volume.
+pub use crate::water::Water as OceanSurface;
+
 #[cfg(test)]
 mod tests {
     use super::*;

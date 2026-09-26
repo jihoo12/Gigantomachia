@@ -1,4 +1,6 @@
-# Water Rendering
+# Ocean and Authored Water Rendering
+
+For finite water that drains according to gravity and collisions, use the [3D fluid solver](fluid.md) and the `water_board` example. This document describes the separate authored rendering effects.
 
 The water surface combines Gerstner displacement, sky and planar scene reflections, directional shadows, screen-space refraction, depth absorption, and animated shoreline foam. It is a visual model, not a fluid simulation; no imported textures or models are required.
 
@@ -69,8 +71,8 @@ Both styles now use irregular gradient fields rather than repeating crossed sine
 ## Water on a Board
 
 ```sh
-cargo run --release --example water_board
-cargo run --example water_board -- --headless /tmp/water-board.png 1.25
+cargo run --release --example waterfall_visual
+cargo run --example waterfall_visual -- --headless /tmp/water-board.png 1.25
 ```
 
 The example places a shallow rectangular surface on an elevated wooden board. Alternating slats remain visible through refraction; a raised wooden rim covers the water edges except for a front outlet. A [falling-water effect](waterfall.md) drains visually into a puddle. Two colored markers make reflected silhouettes easy to identify. It starts with realistic shading, small waves, and foam disabled. The standard pause, camera, style, and effect controls apply. Navigation is unconstrained in this bounded-water example.

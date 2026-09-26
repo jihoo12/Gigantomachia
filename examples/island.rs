@@ -15,10 +15,11 @@ use std::sync::Arc;
 fn main() -> EngineResult<()> {
     let island = Island::default();
     let scene = Scene {
+        fluids: Vec::new(),
         camera: Camera::looking_at(Vec3::new(34.0, 24.0, 42.0), Vec3::new(0.0, 4.0, -12.0))?,
         sun: Default::default(),
         meshes: vec![MeshInstance::new(Arc::new(island.mesh()?))],
-        water: Some(Water {
+        ocean: Some(Water {
             amplitude: 0.55,
             ..Default::default()
         }),
