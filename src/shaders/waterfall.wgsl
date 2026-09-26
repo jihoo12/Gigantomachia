@@ -109,14 +109,24 @@ fn corner(index: u32) -> vec2<f32> {
 
         let macro_flow = fbm(vec2<f32>(uv.x * 3.1 + time * 0.12, uv.y * 1.7 - time * 0.19));
         let turbulent = fbm(vec2<f32>(uv.x * 12.0 - time * 0.31, uv.y * 5.0 + time * 0.42));
-        let breakup = smoothstep(0.32, 0.98, uv.y) * turbulent;
+        let breakup = smoothstep(0.46, 0.98, uv.y) * turbulent;
         let edge = abs(uv.x * 2.0 - 1.0);
 
         // A small board spill contracts into a narrow coherent stream as gravity accelerates it.
-        let contraction = mix(1.0, 0.58, smoothstep(0.10, 0.92, uv.y));
-        let local_width = width * contraction * mix(0.94, 1.04, macro_flow);
-        let wander = (macro_flow - 0.5) * width * 0.045 + (turbulent - 0.5) * width * 0.018 * uv.y;
-        let forward_noise = (turbulent - 0.5) * 0.055 * sin(uv.y * PI);
+        // Preserve the irregular distribution of water leaving the lip.  A small spill
+        // does not funnel itself into a perfectly centred nozzle: some bands carry more
+        // water, the two edges peel away at different rates, and the centre of mass drifts.
+        let along = fbm(vec2<f32>(uv.x * 5.2 + time * 0.08, 3.7 - time * 0.11));
+        let left_edge = (fbm(vec2<f32>(time * 0.10, 17.3)) - 0.5) * 0.10;
+        let right_edge = (fbm(vec2<f32>(time * 0.09 + 8.1, 29.4)) - 0.5) * 0.10;
+        let asymmetric = mix(left_edge, right_edge, uv.x);
+        let contraction = mix(1.0, 0.76, smoothstep(0.16, 0.94, uv.y));
+        let local_width = width * contraction * (0.94 + 0.10 * along);
+        let centre_drift = (macro_flow - 0.5) * width * 0.13
+            + sin(time * 0.37 + uv.y * 2.1) * width * 0.018 * uv.y;
+        let lateral_banding = (along - 0.5) * width * 0.075 * smoothstep(0.08, 0.72, uv.y);
+        let wander = centre_drift + lateral_banding + asymmetric * width * uv.y;
+        let forward_noise = (turbulent - 0.5) * 0.075 * sin(uv.y * PI);
 
         let crest_forward = crest_u * crest_u * 0.22;
         let crest_drop = crest_u * crest_u * crest_u * 0.08;
@@ -135,7 +145,11 @@ fn corner(index: u32) -> vec2<f32> {
             + smoothstep(0.72, 1.0, edge) * 0.20,
             0.0, 1.0
         );
-        out.thickness = mix(0.11, 0.045, uv.y) * mix(0.84, 1.16, macro_flow);
+        // Uneven thickness is what makes this read as runoff rather than a manufactured
+        // transparent strip.  Keep a coherent core but let neighbouring bands differ.
+        out.thickness = mix(0.105, 0.047, uv.y)
+            * mix(0.72, 1.30, along)
+            * mix(0.90, 1.10, macro_flow);
     // Secondary spray. Billboards are stretched along the ballistic velocity so they
     // read as droplets/ligaments instead of round game particles.
     } else {
@@ -255,9 +269,12 @@ fn corner(index: u32) -> vec2<f32> {
     let optical = 1.0 - exp(-in.thickness * 5.0);
     let edge = pow(abs(in.uv.x * 2.0 - 1.0), 9.0);
     let breakup_field = fbm(vec2<f32>(in.uv.x * 9.0 - time * 0.42, in.uv.y * 7.0 + time * 0.63));
-    let breakup_zone = smoothstep(0.74, 0.99, in.uv.y);
-    let edge_loss = smoothstep(0.55, 1.0, abs(in.uv.x * 2.0 - 1.0)) * breakup_zone;
-    let holes = mix(0.0, 0.34, breakup_zone) + edge_loss * 0.10;
+    let breakup_zone = smoothstep(0.66, 0.99, in.uv.y);
+    let edge_loss = smoothstep(0.52, 1.0, abs(in.uv.x * 2.0 - 1.0)) * breakup_zone;
+    // Sparse, asymmetric breakup: avoid a symmetric triangular/funnel silhouette.
+    let lateral_breakup = fbm(vec2<f32>(in.uv.x * 4.7 + 5.2, time * 0.16));
+    let holes = mix(0.0, 0.25 + lateral_breakup * 0.13, breakup_zone)
+        + edge_loss * (0.06 + lateral_breakup * 0.08);
     if breakup_zone > 0.03 && breakup_field < holes {
         discard;
     }
