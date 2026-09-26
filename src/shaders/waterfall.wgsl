@@ -45,6 +45,20 @@ fn fbm(p0: vec2<f32>) -> f32 {
 @group(1) @binding(2) var opaque_depth: texture_depth_2d;
 @group(1) @binding(3) var reflection_color: texture_2d<f32>;
 
+// Shared receiving-domain fluid state.  The spill samples the same velocity/height
+// field that the lower water surface renders instead of inventing four visual lobes.
+const FLOW_W: u32 = 64u;
+const FLOW_H: u32 = 128u;
+@group(2) @binding(0) var<storage, read> flow_state: array<vec4<f32>>;
+
+fn spill_flow_sample(world: vec2<f32>) -> vec4<f32> {
+    let b = scene.secondary_bounds;
+    let uv = clamp((world - (b.xy - b.zw)) / (b.zw * 2.0), vec2<f32>(0.0), vec2<f32>(1.0));
+    let x = u32(uv.x * f32(FLOW_W - 1u));
+    let y = u32(uv.y * f32(FLOW_H - 1u));
+    return flow_state[y * FLOW_W + x];
+}
+
 fn refracted_scene(clip: vec4<f32>, normal: vec3<f32>, thickness: f32) -> vec3<f32> {
     let size = vec2<f32>(textureDimensions(opaque_color));
     let uv = clip.xy / size;
@@ -108,33 +122,26 @@ fn corner(index: u32) -> vec2<f32> {
         let t = fall_u * flight;
         let speed = exit_speed + 9.81 * t;
 
-        // Four overlapping discharge lobes. They are not separate drawn streams:
-        // the fragment coverage below uses the same field, allowing lobes to merge.
+        // Read the fluid state along the ballistic landing footprint.  Height and
+        // horizontal speed become the local boundary flux; neighbouring cells therefore
+        // merge/split the falling surface naturally instead of four authored rivulets.
         let x = uv.x;
-        let drift0 = (fbm(vec2<f32>(time * 0.09, 2.1)) - 0.5) * 0.055;
-        let drift1 = (fbm(vec2<f32>(time * 0.08, 7.7)) - 0.5) * 0.060;
-        let drift2 = (fbm(vec2<f32>(time * 0.11, 13.2)) - 0.5) * 0.050;
-        let drift3 = (fbm(vec2<f32>(time * 0.07, 21.8)) - 0.5) * 0.065;
-        let q0 = exp(-pow((x - (0.18 + drift0)) / 0.115, 2.0)) * (0.55 + 0.28 * sin(time * 0.31 + 0.4));
-        let q1 = exp(-pow((x - (0.40 + drift1)) / 0.105, 2.0)) * (0.78 + 0.18 * sin(time * 0.27 + 2.0));
-        let q2 = exp(-pow((x - (0.62 + drift2)) / 0.125, 2.0)) * (0.66 + 0.24 * sin(time * 0.23 + 4.1));
-        let q3 = exp(-pow((x - (0.83 + drift3)) / 0.095, 2.0)) * (0.46 + 0.22 * sin(time * 0.35 + 5.3));
-        let discharge = clamp(q0 + q1 + q2 + q3, 0.0, 1.0);
+        let sample_world = landing.xz + across.xz * ((x - 0.5) * width);
+        let fluid = spill_flow_sample(sample_world);
+        let flow_speed = length(fluid.yz);
+        let flux = clamp(0.22 + fluid.x * 9.0 + flow_speed * 1.8, 0.04, 1.0);
         let local_noise = fbm(vec2<f32>(x * 7.0 + time * 0.10, uv.y * 2.4 - time * 0.16));
         let turbulent = fbm(vec2<f32>(x * 15.0 - time * 0.29, uv.y * 6.0 + time * 0.38));
 
-        // Surface tension contracts each occupied band only after it has cleared the lip.
-        // Empty/weak bands remain gaps rather than being pulled toward one common centre.
-        let band_pull =
-            q0 * ((0.18 + drift0) - x) +
-            q1 * ((0.40 + drift1) - x) +
-            q2 * ((0.62 + drift2) - x) +
-            q3 * ((0.83 + drift3) - x);
-        let pull = band_pull / max(q0 + q1 + q2 + q3, 0.20);
-        let contracted_x = x + pull * smoothstep(0.24, 0.96, uv.y) * 0.34;
+        // Lateral velocity in the shared domain bends the stream.  Contraction comes
+        // from falling acceleration (mass continuity), not hand-authored band centres.
+        let lateral_velocity = dot(vec2<f32>(fluid.y, fluid.z), across.xz);
+        let contraction = mix(1.0, 0.72, smoothstep(0.22, 1.0, uv.y));
+        let contracted_x = 0.5 + (x - 0.5) * contraction;
         let lateral = (contracted_x - 0.5) * width
-            + (local_noise - 0.5) * width * 0.025 * smoothstep(0.18, 0.85, uv.y);
-        let forward_noise = (turbulent - 0.5) * 0.045 * sin(uv.y * PI);
+            + lateral_velocity * t * 0.24
+            + (local_noise - 0.5) * width * 0.018 * smoothstep(0.18, 0.85, uv.y);
+        let forward_noise = (turbulent - 0.5) * 0.028 * sin(uv.y * PI);
         let crest_forward = crest_u * crest_u * 0.20;
         let crest_drop = crest_u * crest_u * crest_u * 0.07;
 
@@ -145,11 +152,12 @@ fn corner(index: u32) -> vec2<f32> {
         out.normal = normalize(forward * speed + vec3<f32>(0.0, exit_speed, 0.0)
             + across * ((turbulent - 0.5) * 0.34));
         out.uv = uv;
-        // Pass discharge through aeration so fragment coverage can remove dry gaps.
-        out.aeration = discharge;
-        out.thickness = mix(0.082, 0.038, uv.y)
-            * mix(0.72, 1.22, local_noise)
-            * (0.42 + 0.58 * discharge);
+        // Flux controls continuity and thickness. Low-flux cells become narrow/thin,
+        // while high-flux neighbours visually join into one free surface.
+        out.aeration = flux;
+        out.thickness = mix(0.072, 0.034, uv.y)
+            * mix(0.82, 1.14, local_noise)
+            * mix(0.38, 1.0, flux);
     // Secondary spray. Billboards are stretched along the ballistic velocity so they
     // read as droplets/ligaments instead of round game particles.
     } else {
@@ -273,7 +281,7 @@ fn corner(index: u32) -> vec2<f32> {
     // Weak lateral bands are genuinely dry. Strong neighbouring bands overlap and read
     // as naturally merging rivulets rather than one alpha-masked sheet.
     let coverage_noise = fbm(vec2<f32>(in.uv.x * 18.0 + time * 0.17, in.uv.y * 4.5 - time * 0.24));
-    let threshold = mix(0.30, 0.48, smoothstep(0.15, 0.95, in.uv.y));
+    let threshold = mix(0.16, 0.34, smoothstep(0.15, 0.95, in.uv.y));
     let holes = 1.0 - smoothstep(threshold - 0.10, threshold + 0.08, discharge * (0.82 + 0.28 * coverage_noise));
     // 'holes' is now the dry-band probability itself, so it replaces the old
     // breakup_zone/edge_loss controls that belonged to the single-curtain model.
