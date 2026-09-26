@@ -115,7 +115,8 @@ fn island_scene_shares_geometry_updates_transforms_and_releases_assets() -> Engi
             time: 1.25,
             ..Default::default()
         }),
-    };
+        secondary_water: None,
+};
     let ocean = frame(&gpu, &mut renderer, &target, &scene)?;
     let mesh = Arc::new(Island::default().mesh()?);
     scene.meshes.push(MeshInstance::new(mesh.clone()));
