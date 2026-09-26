@@ -20,7 +20,7 @@ fn collide_plane(pos0: vec3<f32>, vel0: vec3<f32>, top: f32, cx: f32, cz: f32, h
     if inside && pos.y < top+p.dt_gravity.z && pos.y > top-0.20 && vel.y<0.0 {
         pos.y=top+p.dt_gravity.z;
         vel.y=-vel.y*p.dt_gravity.w;
-        vel.xz*=p.lower.y;
+        vel.x *= p.lower.y; vel.z *= p.lower.y;
     }
     return vec4<f32>(pos,0.0)+vec4<f32>(vel,0.0)*0.0;
 }
@@ -39,11 +39,11 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     // there is simply no supporting plane and gravity keeps acting.
     let upper_inside=abs(pos.x-p.board.x)<p.board.w && abs(pos.z-p.board.z)<p.board2.x;
     if upper_inside && pos.y<p.board.y+p.dt_gravity.z && pos.y>p.board.y-0.20 && vel.y<0.0 {
-        pos.y=p.board.y+p.dt_gravity.z; vel.y=-vel.y*p.dt_gravity.w; vel.xz*=p.lower.y;
+        pos.y=p.board.y+p.dt_gravity.z; vel.y=-vel.y*p.dt_gravity.w; vel.x *= p.lower.y; vel.z *= p.lower.y;
     }
     let lower_inside=abs(pos.x)<p.board2.w && abs(pos.z-p.board2.z)<p.lower.x;
     if lower_inside && pos.y<p.board2.y+p.dt_gravity.z && pos.y>p.board2.y-0.20 && vel.y<0.0 {
-        pos.y=p.board2.y+p.dt_gravity.z; vel.y=-vel.y*p.dt_gravity.w; vel.xz*=p.lower.y;
+        pos.y=p.board2.y+p.dt_gravity.z; vel.y=-vel.y*p.dt_gravity.w; vel.x *= p.lower.y; vel.z *= p.lower.y;
     }
 
     // Recycle particles that have left the demonstration volume back to the source.
