@@ -39,7 +39,6 @@ impl WaterPass {
         format: wgpu::TextureFormat,
         layout: &wgpu::BindGroupLayout,
         inputs: &wgpu::BindGroupLayout,
-        flow: &wgpu::BindGroupLayout,
     ) -> Self {
         let attributes = wgpu::vertex_attr_array![0 => Float32x2];
         let vertex_layout = wgpu::VertexBufferLayout {
@@ -57,7 +56,7 @@ impl WaterPass {
             format,
             "water",
             &source,
-            &[layout, inputs, flow],
+            &[layout, inputs],
             &[vertex_layout],
             Some(true),
         );
