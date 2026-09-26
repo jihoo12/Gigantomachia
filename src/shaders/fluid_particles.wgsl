@@ -7,13 +7,13 @@ struct Params {
     emitter_velocity: vec4<f32>,
     counts: vec4<u32>,
 };
-struct Aabb { min: vec4<f32>, max: vec4<f32> };
+struct Collider { center: vec4<f32>, half: vec4<f32>, rotation: vec4<f32> };
 @group(0) @binding(0) var<storage, read> src: array<vec4<f32>>;
 @group(0) @binding(1) var<storage, read_write> dst: array<vec4<f32>>;
 @group(0) @binding(2) var<storage, read> vel_src: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> vel_dst: array<vec4<f32>>;
 @group(0) @binding(4) var<uniform> p: Params;
-@group(0) @binding(5) var<storage, read> colliders: array<Aabb>;
+@group(0) @binding(5) var<storage, read> colliders: array<Collider>;
 @group(0) @binding(6) var<storage, read_write> grid_counts: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> grid_particles: array<u32>;
 @group(0) @binding(8) var<storage, read_write> density: array<f32>;
@@ -21,6 +21,13 @@ struct Aabb { min: vec4<f32>, max: vec4<f32> };
 const GRID_DIM = vec3<u32>(64u, 32u, 96u);
 const GRID_ORIGIN = vec3<f32>(-8.0, -1.0, -4.0);
 const CELL_SIZE = 0.16;
+
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    return v + 2.0*cross(q.xyz, cross(q.xyz,v) + q.w*v);
+}
+fn quat_inverse_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    return quat_rotate(vec4<f32>(-q.xyz,q.w),v);
+}
 
 fn grid_cell(pos: vec3<f32>) -> vec3<u32> {
     let c=vec3<i32>(floor((pos-GRID_ORIGIN)/CELL_SIZE));
@@ -136,16 +143,21 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     vel.y-=p.dt_gravity.y*p.dt_gravity.x; pos+=vel*p.dt_gravity.x;
     let r=p.dt_gravity.z;
     for(var c=0u;c<p.counts.x;c++) {
-        let lo=colliders[c].min.xyz-vec3<f32>(r); let hi=colliders[c].max.xyz+vec3<f32>(r);
-        if all(pos>lo) && all(pos<hi) {
-            let a=pos-lo; let b=hi-pos; var axis=0u; var side=-1.0; var depth=a.x;
+        let box=colliders[c];
+        let local=quat_inverse_rotate(box.rotation,pos-box.center.xyz);
+        let lo=-box.half.xyz-vec3<f32>(r); let hi=box.half.xyz+vec3<f32>(r);
+        if all(local>lo) && all(local<hi) {
+            let a=local-lo; let b=hi-local; var axis=0u; var side=-1.0; var depth=a.x;
             if b.x<depth { depth=b.x; side=1.0; }
             if a.y<depth { depth=a.y; axis=1u; side=-1.0; }
             if b.y<depth { depth=b.y; axis=1u; side=1.0; }
             if a.z<depth { depth=a.z; axis=2u; side=-1.0; }
             if b.z<depth { axis=2u; side=1.0; }
-            var n=vec3<f32>(0.0); n[axis]=side;
-            if side<0.0 { pos[axis]=lo[axis]; } else { pos[axis]=hi[axis]; }
+            var local_n=vec3<f32>(0.0); local_n[axis]=side;
+            var corrected=local;
+            if side<0.0 { corrected[axis]=lo[axis]; } else { corrected[axis]=hi[axis]; }
+            pos=box.center.xyz+quat_rotate(box.rotation,corrected);
+            let n=quat_rotate(box.rotation,local_n);
             let vn=dot(vel,n);
             if vn<0.0 {
                 // Water should settle and slide on solids instead of bouncing like a ball.
