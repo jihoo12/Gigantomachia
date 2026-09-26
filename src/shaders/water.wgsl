@@ -79,10 +79,15 @@ struct WaterVertex {
         displacement.y += impact * 0.075 + ring * 0.028;
         let downstream = max(dot(delta, flow), 0.0);
         let lateral = abs(dot(delta, vec2<f32>(flow.y, -flow.x)));
-        let wake = exp(-lateral * 1.7) * exp(-downstream * 0.22) * smoothstep(0.0, 0.7, downstream);
-        displacement.y += wake * (noise(point * 4.2 - flow * scene.camera_time.w * 1.8) - 0.5) * 0.055;
-        displacement.x += flow.x * wake * 0.035;
-        displacement.z += flow.y * wake * 0.035;
+        let wake_width = 0.28 + downstream * 0.10;
+        let wake = exp(-abs(lateral) / max(wake_width, 0.05)) * exp(-downstream * 0.16)
+            * smoothstep(-0.05, 0.55, downstream);
+        let advected_noise =
+            (noise(vec2<f32>(lateral * 3.1, downstream * 2.2 - scene.camera_time.w * 1.7)) - 0.5) * 0.72 +
+            (noise(vec2<f32>(lateral * 8.7 + 3.2, downstream * 5.0 - scene.camera_time.w * 2.6)) - 0.5) * 0.28;
+        displacement.y += wake * advected_noise * 0.085;
+        displacement.x += flow.x * wake * 0.060;
+        displacement.z += flow.y * wake * 0.060;
     }
     let world = vec3<f32>(point.x, level, point.y) + displacement;
     var out: WaterVertex;
@@ -334,7 +339,42 @@ fn reflected_scene(world: vec3<f32>, normal: vec3<f32>, fallback: vec3<f32>) -> 
     let breaker = sin(vertical_depth * 8.0 - scene.camera_time.w * 1.8 + bubbles * 3.0) * 0.5 + 0.5;
     let foam_pattern = smoothstep(0.35, 0.72, bubbles * 0.7 + breaker * 0.3);
     let contact = 1.0 - smoothstep(0.0, min(0.12, scene.effects.w), vertical_depth);
-    let foam = clamp(shore * (0.25 + 0.75 * foam_pattern) + contact * 0.3, 0.0, 1.0) * scene.effects.z;
+    var foam = clamp(shore * (0.25 + 0.75 * foam_pattern) + contact * 0.3, 0.0, 1.0) * scene.effects.z;
+
+    // Carry the waterfall's momentum into the lower surface.  The impact core is
+    // aerated and bright; downstream it stretches into irregular advected foam
+    // filaments instead of stopping at a circular splash decal.
+    if scene.waterfall_origin.w > 0.0 && in.surface_data.y > 0.5 {
+        let spill_f = scene.waterfall_origin.xyz;
+        let flow_f = normalize(vec2<f32>(scene.waterfall_shape.x, scene.waterfall_shape.y));
+        let across_f = vec2<f32>(flow_f.y, -flow_f.x);
+        let flight_f = sqrt(2.0 * max(scene.waterfall_shape.z, 0.05) / 9.81);
+        let landing_f = spill_f.xz + flow_f * (0.22 + 1.3 * flight_f);
+        let rel_f = in.world.xz - landing_f;
+        let downstream_f = dot(rel_f, flow_f);
+        let lateral_f = dot(rel_f, across_f);
+        let impact_r = length(rel_f);
+
+        let impact_foam = exp(-impact_r * impact_r * 3.6);
+        let advected = max(downstream_f, 0.0);
+        let meander =
+            (noise(vec2<f32>(advected * 0.55 - scene.camera_time.w * 0.42, 2.1)) - 0.5) * 0.48 +
+            sin(advected * 1.7 - scene.camera_time.w * 0.75) * 0.11;
+        let wake_width = 0.18 + advected * 0.085;
+        let centerline = exp(-pow(abs(lateral_f - meander) / max(wake_width, 0.04), 1.55));
+        let wake_decay = exp(-advected * 0.20) * smoothstep(-0.08, 0.42, downstream_f);
+        let filament_noise =
+            noise(vec2<f32>(lateral_f * 7.0, advected * 2.2 - scene.camera_time.w * 1.15)) * 0.62 +
+            noise(vec2<f32>(lateral_f * 17.0 + 4.7, advected * 5.1 - scene.camera_time.w * 1.9)) * 0.38;
+        let filament = smoothstep(0.43, 0.68, filament_noise);
+        let wake_foam = centerline * wake_decay * mix(0.30, 1.0, filament);
+
+        foam = clamp(foam + impact_foam * 0.86 + wake_foam * 0.68, 0.0, 1.0);
+
+        // Aerated impact water scatters light and hides the brown channel bed locally.
+        let turbulence = clamp(impact_foam * 0.75 + centerline * wake_decay * 0.28, 0.0, 1.0);
+        color = mix(color, vec3<f32>(0.22, 0.34, 0.34) * (0.65 + 0.35 * visibility), turbulence * 0.32);
+    }
     let foam_color = vec3<f32>(0.80, 0.88, 0.86) * (0.45 + 0.55 * visibility);
     color = mix(color, foam_color, foam);
     let haze = select(smoothstep(65.0, 120.0, length(in.world.xz - scene.camera_time.xz)),
