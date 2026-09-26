@@ -41,6 +41,8 @@ pub(super) struct ParticleFluid {
     insert_pipeline: wgpu::ComputePipeline,
     density_pipeline: wgpu::ComputePipeline,
     density: wgpu::Buffer,
+    emit_cursor: u32,
+    emit_accumulator: f32,
 }
 
 impl ParticleFluid {
@@ -79,7 +81,7 @@ impl ParticleFluid {
         let render_shader=gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("fluid-particle-render"),source:wgpu::ShaderSource::Wgsl(format!("{}\n{}",include_str!("../shaders/common.wgsl"),include_str!("../shaders/fluid_particles_render.wgsl")).into())});
         let rpl=gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:Some("fluid-particle-render-pipeline-layout"),bind_group_layouts:&[scene_layout,&render_layout],push_constant_ranges:&[]});
         let render_pipeline=gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{label:Some("fluid-particle-debug-render"),layout:Some(&rpl),vertex:wgpu::VertexState{module:&render_shader,entry_point:Some("vs_main"),buffers:&[],compilation_options:Default::default()},fragment:Some(wgpu::FragmentState{module:&render_shader,entry_point:Some("fs_main"),targets:&[Some(wgpu::ColorTargetState{format:super::targets::HDR_FORMAT,blend:Some(wgpu::BlendState::ALPHA_BLENDING),write_mask:wgpu::ColorWrites::ALL})],compilation_options:Default::default()}),primitive:wgpu::PrimitiveState{cull_mode:None,..Default::default()},depth_stencil:Some(wgpu::DepthStencilState{format:super::DEPTH_FORMAT,depth_write_enabled:true,depth_compare:wgpu::CompareFunction::Less,stencil:Default::default(),bias:Default::default()}),multisample:Default::default(),multiview:None,cache:None});
-        Self{pipeline,render_pipeline,groups,render_groups,current:0,params,colliders,grid_counts,grid_particles,clear_pipeline,insert_pipeline,density_pipeline,density}
+        Self{pipeline,render_pipeline,groups,render_groups,current:0,params,colliders,grid_counts,grid_particles,clear_pipeline,insert_pipeline,density_pipeline,density,emit_cursor:0,emit_accumulator:0.0}
     }
 
     pub fn update(&mut self,gpu:&Gpu,encoder:&mut wgpu::CommandEncoder,world:Option<&FluidWorld>){
@@ -93,12 +95,18 @@ impl ParticleFluid {
         }
         if !gpu_colliders.is_empty(){gpu.queue.write_buffer(&self.colliders,0,bytemuck::cast_slice(&gpu_colliders));}
         let min=emitter.volume.min(); let max=emitter.volume.max();
+        let dt=1.0/60.0;
+        self.emit_accumulator+=emitter.rate*dt;
+        let emit_count=(self.emit_accumulator.floor() as u32).min(PARTICLE_COUNT);
+        self.emit_accumulator-=emit_count as f32;
+        let emit_start=self.emit_cursor;
+        self.emit_cursor=(self.emit_cursor+emit_count)%PARTICLE_COUNT;
         let p=Params{
-            dt_gravity:[1.0/60.0,9.81,0.025,0.08],
+            dt_gravity:[dt,9.81,0.025,0.08],
             emitter_min:[min.x,min.y,min.z,emitter.rate],
             emitter_max:[max.x,max.y,max.z,0.0],
             emitter_velocity:[emitter.velocity.x,emitter.velocity.y,emitter.velocity.z,0.0],
-            counts:[gpu_colliders.len() as u32,PARTICLE_COUNT,GRID_CELLS,CELL_CAPACITY],
+            counts:[gpu_colliders.len() as u32,PARTICLE_COUNT,emit_start,emit_count],
         };
         gpu.queue.write_buffer(&self.params,0,bytemuck::bytes_of(&p));
         let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor{label:Some("3d-fluid-particle-step"),timestamp_writes:None});
