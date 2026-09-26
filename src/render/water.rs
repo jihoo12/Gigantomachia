@@ -73,7 +73,7 @@ impl WaterPass {
         }
     }
 
-    pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>, detailed: bool) {
+    pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>, detailed: bool, surface_count: u32) {
         let grid = if detailed {
             self.detailed.as_ref().expect("prepared detailed grid")
         } else {
@@ -82,7 +82,7 @@ impl WaterPass {
         pass.set_pipeline(&self.pipeline);
         pass.set_vertex_buffer(0, grid.vertices.slice(..));
         pass.set_index_buffer(grid.indices.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..grid.index_count, 0, 0..1);
+        pass.draw_indexed(0..grid.index_count, 0, 0..surface_count);
     }
 }
 
