@@ -90,6 +90,22 @@ fn main() -> EngineResult<()> {
             )?);
         }
     }
+    // A lower receiving channel gives the spill somewhere physical to land and continue.
+    // The channel is deliberately wider than the outlet so impact spray reads against water,
+    // rather than disappearing into the ground plane.
+    meshes.push(cuboid(
+        Vec3::new(0.0, 0.055, 5.25),
+        Vec3::new(2.35, 0.055, 3.15),
+        [0.20, 0.095, 0.035],
+    )?);
+    for x in [-2.30, 2.30] {
+        meshes.push(cuboid(
+            Vec3::new(x, 0.34, 5.25),
+            Vec3::new(0.08, 0.34, 3.15),
+            [0.38, 0.18, 0.055],
+        )?);
+    }
+
     // Colored markers make reflected silhouettes easy to compare with the 5 key.
     meshes.push(cuboid(
         Vec3::new(-1.2, 2.10, -1.5),
@@ -109,7 +125,9 @@ fn main() -> EngineResult<()> {
             ..Default::default()
         },
         water: Some(Water {
-            bounds: Some(WaterBounds::new(Vec2::ZERO, Vec2::new(3.82, 2.32))?),
+            // Extend the bounded surface through the lower receiving channel. The shader
+            // clips the high/low portions around the spill so this reads as one continuous flow.
+            bounds: Some(WaterBounds::new(Vec2::new(0.0, 2.45), Vec2::new(3.82, 4.77))?),
             level: 1.55,
             waterfall: Some(Waterfall::new(
                 Vec3::new(0.0, 1.55, 2.31),
