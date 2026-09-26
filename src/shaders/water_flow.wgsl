@@ -31,7 +31,12 @@ fn state(x:i32,y:i32)->vec4<f32>{return src[idx(u32(clamp(x,0,i32(W)-1)),u32(cla
  let producer=select(0.0,1.0,p.outlet.w<0.0);
  let nominal_depth=abs(p.outlet.w);
  let incoming_flux=nominal_depth*sqrt(2.0*9.81*max(nominal_depth,0.001));
- let transfer=injection*incoming_flux;
+ // Only the receiver uses the prescribed transfer. The producer must derive its
+ // discharge from its own simulated depth and outward velocity at the lip.
+ let dynamic_depth=max(nominal_depth+c.x,0.0);
+ let outward=max(dot(vel,p.direction.xy),0.0);
+ let producer_flux=dynamic_depth*max(outward,sqrt(2.0*9.81*dynamic_depth)*0.28);
+ let transfer=injection*mix(incoming_flux,producer_flux,producer);
  // A producer domain has a real mass source on the side opposite the outlet.
  // This establishes a persistent source -> transport -> open-boundary flow instead
  // of draining an initially flat visual surface.
@@ -63,8 +68,20 @@ fn state(x:i32,y:i32)->vec4<f32>{return src[idx(u32(clamp(x,0,i32(W)-1)),u32(cla
  // Side walls are solid.  At the long ends damp the state so waves/foam can
  // leave the finite simulation instead of reflecting and accumulating forever.
  if gid.x==0u||gid.x+1u==W{vel.x=0.0;}
+ // Producer outlet is an actual open boundary. Cells in the lip aperture keep their
+ // outward characteristic instead of being damped/reflected by the generic edge rule.
+ let outlet_delta=world-p.outlet.xy;
+ let along=dot(outlet_delta,p.direction.xy);
+ let lateral=abs(dot(outlet_delta,vec2<f32>(p.direction.y,-p.direction.x)));
+ let cell_size=max(dx,dz);
+ let at_lip=producer>0.5 && lateral<=p.outlet.z && abs(along)<=cell_size*1.75;
+ if at_lip {
+   vel=max(dot(vel,p.direction.xy),sqrt(2.0*9.81*max(nominal_depth+h,0.001))*0.28)*p.direction.xy
+       +(vel-p.direction.xy*dot(vel,p.direction.xy))*0.65;
+   h-=producer_flux*dt/max(cell_size,0.01)*0.22;
+ }
  let edge_y=min(gid.y,H-1u-gid.y);
- if edge_y<5u {
+ if edge_y<5u && !at_lip {
    let open=f32(edge_y)/5.0;
    vel*=mix(0.72,1.0,open);h*=mix(0.45,1.0,open);foam*=mix(0.55,1.0,open);
  }
