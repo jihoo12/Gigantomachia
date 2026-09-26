@@ -46,7 +46,7 @@ pub struct Renderer {
     sky: wgpu::RenderPipeline,
     water: WaterPass,
     waterfall: waterfall::WaterfallPass,
-    flow: flow::FlowSimulation,
+    flow: flow::FluidSimulation,
     meshes: MeshPass,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -295,7 +295,7 @@ impl Renderer {
             ],
         });
         let water_layout = targets::water_layout(gpu);
-        let flow_layout = flow::FlowSimulation::layout(gpu);
+        let flow_layout = flow::FluidSimulation::layout(gpu);
         let post_layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -328,7 +328,7 @@ impl Renderer {
             ),
             waterfall: waterfall::WaterfallPass::new(gpu, &layout, &water_layout),
             water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout, &flow_layout),
-            flow: flow::FlowSimulation::new(gpu, &flow_layout),
+            flow: flow::FluidSimulation::new(gpu, &flow_layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
                 gpu,
