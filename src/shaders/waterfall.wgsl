@@ -40,6 +40,21 @@ fn fbm(p0: vec2<f32>) -> f32 {
     return sum / 0.9375;
 }
 
+@group(1) @binding(0) var opaque_color: texture_2d<f32>;
+@group(1) @binding(1) var color_sampler: sampler;
+@group(1) @binding(2) var opaque_depth: texture_depth_2d;
+@group(1) @binding(3) var reflection_color: texture_2d<f32>;
+
+fn refracted_scene(clip: vec4<f32>, normal: vec3<f32>, thickness: f32) -> vec3<f32> {
+    let size = vec2<f32>(textureDimensions(opaque_color));
+    let uv = clip.xy / size;
+    let distortion = normal.xz * (0.010 + min(thickness, 0.25) * 0.055) * scene.effects.y;
+    let sample_uv = clamp(uv + distortion, vec2<f32>(0.002), vec2<f32>(0.998));
+    let background = textureSampleLevel(opaque_color, color_sampler, sample_uv, 0.0).rgb;
+    let transmission = exp(-scene.absorption.rgb * max(thickness, 0.015));
+    return background * transmission;
+}
+
 fn corner(index: u32) -> vec2<f32> {
     let corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
@@ -139,9 +154,9 @@ fn corner(index: u32) -> vec2<f32> {
         let side = normalize(cross(view, tangent));
         let uv = corner(i % 6u) * 2.0 - vec2<f32>(1.0);
 
-        let mist = smoothstep(0.72, 0.98, random(id + 41.0));
-        let radius = mix(0.007, 0.017, random(id + 1.0));
-        let stretch = mix(2.0, 5.5, 1.0 - mist);
+        let mist = smoothstep(0.82, 0.995, random(id + 41.0));
+        let radius = mix(0.004, 0.013, random(id + 1.0));
+        let stretch = mix(2.5, 8.0, 1.0 - mist);
         out.world = center + side * uv.x * radius + tangent * uv.y * radius * stretch;
         out.normal = view;
         out.uv = uv;
