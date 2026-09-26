@@ -9,6 +9,7 @@ const MAX_COLLIDERS: usize = 64;
 const GRID_DIMS: [u32; 3] = [64, 32, 96];
 const GRID_CELLS: u32 = GRID_DIMS[0] * GRID_DIMS[1] * GRID_DIMS[2];
 const CELL_CAPACITY: u32 = 32;
+const SOLVER_SUBSTEPS: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -98,8 +99,9 @@ impl ParticleFluid {
         }
         if !gpu_colliders.is_empty(){gpu.queue.write_buffer(&self.colliders,0,bytemuck::cast_slice(&gpu_colliders));}
         let min=emitter.volume.min(); let max=emitter.volume.max();
-        let dt=1.0/60.0;
-        self.emit_accumulator+=emitter.rate*dt;
+        let frame_dt=1.0/60.0;
+        let dt=frame_dt/SOLVER_SUBSTEPS as f32;
+        self.emit_accumulator+=emitter.rate*frame_dt;
         let emit_count=(self.emit_accumulator.floor() as u32).min(PARTICLE_COUNT);
         self.emit_accumulator-=emit_count as f32;
         let p=Params{
@@ -110,16 +112,23 @@ impl ParticleFluid {
             counts:[gpu_colliders.len() as u32,PARTICLE_COUNT,emit_count,0],
         };
         gpu.queue.write_buffer(&self.params,0,bytemuck::bytes_of(&p));
-        let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor{label:Some("3d-fluid-particle-step"),timestamp_writes:None});
+        for _ in 0..SOLVER_SUBSTEPS {
+            let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor{label:Some("3d-fluid-particle-substep"),timestamp_writes:None});
+            pass.set_bind_group(0,&self.groups[self.current],&[]);
+            pass.set_pipeline(&self.clear_pipeline);pass.dispatch_workgroups(GRID_CELLS.div_ceil(64),1,1);
+            pass.set_pipeline(&self.insert_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
+            pass.set_pipeline(&self.density_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
+            pass.set_pipeline(&self.pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
+            drop(pass);
+            self.current^=1;
+        }
+        // Emit once per rendered frame, after all physics substeps. The grid is no
+        // longer needed here, so grid_counts[0] can safely serve as the allocator counter.
+        let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor{label:Some("3d-fluid-emission"),timestamp_writes:None});
         pass.set_bind_group(0,&self.groups[self.current],&[]);
-        pass.set_pipeline(&self.clear_pipeline);pass.dispatch_workgroups(GRID_CELLS.div_ceil(64),1,1);
-        pass.set_pipeline(&self.insert_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
-        pass.set_pipeline(&self.density_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
-        pass.set_pipeline(&self.pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
-        // The spatial grid is no longer needed after simulation, so reuse one atomic
-        // counter to allocate the requested emission budget from arbitrary inactive slots.
         pass.set_pipeline(&self.clear_emit_pipeline);pass.dispatch_workgroups(1,1,1);
-        pass.set_pipeline(&self.emit_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);drop(pass);
+        pass.set_pipeline(&self.emit_pipeline);pass.dispatch_workgroups(PARTICLE_COUNT.div_ceil(64),1,1);
+        drop(pass);
         self.current^=1;
     }
     pub fn encode<'a>(&'a self,pass:&mut wgpu::RenderPass<'a>){
