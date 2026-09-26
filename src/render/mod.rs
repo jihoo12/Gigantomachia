@@ -37,6 +37,8 @@ struct FrameUniforms {
     waterfall_shape: [f32; 4],
     reflection_view_projection: [[f32; 4]; 4],
     reflection: [f32; 4],
+    secondary_water: [f32; 4],
+    secondary_bounds: [f32; 4],
 }
 
 pub struct Renderer {
@@ -365,8 +367,10 @@ impl Renderer {
         self.meshes.prepare(gpu, &scene.meshes);
         let camera = &scene.camera;
         let water = scene.water.unwrap_or_default();
+        let secondary_water = scene.secondary_water;
         let detailed = water.style == WaterStyle::Realistic;
-        self.water.prepare(gpu, scene.water.is_some() && detailed);
+        let secondary_detailed = secondary_water.is_some_and(|w| w.style == WaterStyle::Realistic);
+        self.water.prepare(gpu, scene.water.is_some() && (detailed || secondary_detailed));
         let sun = scene.sun.direction();
         let matrix = camera.view_projection(self.width as f32 / self.height as f32);
         let reflection_enabled =
@@ -378,6 +382,12 @@ impl Renderer {
         let uniforms = FrameUniforms {
             reflection_view_projection: reflection_matrix.to_cols_array_2d(),
             reflection: [f32::from(reflection_enabled), water.level, 0.0, 0.0],
+            secondary_water: secondary_water.map_or([0.0; 4], |w| [
+                w.amplitude.clamp(0.0, 2.0), w.level, 1.0, 0.0
+            ]),
+            secondary_bounds: secondary_water.and_then(|w| w.bounds).map_or([0.0; 4], |bounds| [
+                bounds.center.x, bounds.center.y, bounds.half_extent.x, bounds.half_extent.y
+            ]),
             view_projection: matrix.to_cols_array_2d(),
             inverse_view_projection: matrix.inverse().to_cols_array_2d(),
             light_view_projection: shadow::matrix(
@@ -540,7 +550,7 @@ impl Renderer {
             self.targets.composite_color.as_image_copy(),
             extent,
         );
-        if scene.water.is_some() {
+        if scene.water.is_some() || scene.secondary_water.is_some() {
             encoder.copy_texture_to_texture(
                 self.targets.opaque_depth.as_image_copy(),
                 self.targets.water_depth.as_image_copy(),
@@ -570,7 +580,7 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
-            self.water.encode(&mut pass, detailed);
+            self.water.encode(&mut pass, detailed || secondary_detailed, 1 + u32::from(secondary_water.is_some()));
             if water.waterfall.is_some() {
                 self.waterfall.encode(&mut pass);
             }
