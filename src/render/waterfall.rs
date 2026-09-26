@@ -9,6 +9,7 @@ impl WaterfallPass {
         gpu: &Gpu,
         layout: &wgpu::BindGroupLayout,
         inputs: &wgpu::BindGroupLayout,
+        fluid: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = gpu
             .device
@@ -28,7 +29,7 @@ impl WaterfallPass {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("waterfall-layout"),
-                bind_group_layouts: &[layout, inputs],
+                bind_group_layouts: &[layout, inputs, fluid],
                 push_constant_ranges: &[],
             });
         Self {
@@ -72,7 +73,8 @@ impl WaterfallPass {
     }
     pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
-        // Receiving puddle, falling sheet, then spray. Approximate transparency ordering.
-        pass.draw(0..(96 * 3 + 32 * 32 * 6 + 384 * 6), 0..1);
+        // The receiving-water disk is deliberately gone: impact response now belongs to
+        // the fluid domain. Draw only the continuous free-fall surface and spray.
+        pass.draw((96 * 3)..(96 * 3 + 32 * 32 * 6 + 384 * 6), 0..1);
     }
 }
