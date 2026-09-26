@@ -100,7 +100,10 @@ fn corner(index: u32) -> vec2<f32> {
         let i = index - 288u;
         let cell = i / 6u;
         let uv = (vec2<f32>(f32(cell % 32u), f32(cell / 32u)) + corner(i % 6u)) / 32.0;
-        let t = uv.y * flight;
+        let crest_end = 0.18;
+        let crest_u = min(uv.y / crest_end, 1.0);
+        let fall_u = max((uv.y - crest_end) / (1.0 - crest_end), 0.0);
+        let t = fall_u * flight;
         let speed = 1.3 + 9.81 * t;
 
         let macro_flow = fbm(vec2<f32>(uv.x * 3.1 + time * 0.12, uv.y * 1.7 - time * 0.19));
@@ -112,10 +115,12 @@ fn corner(index: u32) -> vec2<f32> {
         let wander = (macro_flow - 0.5) * width * 0.10 + (turbulent - 0.5) * width * 0.035 * uv.y;
         let forward_noise = (turbulent - 0.5) * 0.055 * sin(uv.y * PI);
 
+        let crest_forward = crest_u * crest_u * 0.22;
+        let crest_drop = crest_u * crest_u * crest_u * 0.08;
         out.world = origin
             + across * ((uv.x - 0.5) * local_width + wander)
-            + forward * (1.3 * t + forward_noise)
-            - vec3<f32>(0.0, 0.5 * 9.81 * t * t, 0.0);
+            + forward * (crest_forward + 1.3 * t + forward_noise)
+            - vec3<f32>(0.0, crest_drop + 0.5 * 9.81 * t * t, 0.0);
 
         // The geometric normal follows the ballistic sheet; fragment microstructure
         // adds the capillary-scale detail.
@@ -225,7 +230,7 @@ fn corner(index: u32) -> vec2<f32> {
     // noticeable where the sheet is optically thick; blue paint is deliberately absent.
     let absorption = vec3<f32>(0.42, 0.12, 0.055);
     let transmission = exp(-absorption * in.thickness);
-    let ambient_transmission = vec3<f32>(0.54, 0.60, 0.59) * transmission;
+    let ambient_transmission = refracted_scene(in.clip, normal, in.thickness) * transmission;
     var color = mix(ambient_transmission, reflected, fresnel);
 
     // Air entrainment, not an arbitrary streak texture, creates white water.
@@ -238,9 +243,17 @@ fn corner(index: u32) -> vec2<f32> {
     // coherent centre transparent while edges/broken regions become bright and opaque.
     let optical = 1.0 - exp(-in.thickness * 5.0);
     let edge = pow(abs(in.uv.x * 2.0 - 1.0), 9.0);
+    let breakup_field = fbm(vec2<f32>(in.uv.x * 9.0 - time * 0.42, in.uv.y * 7.0 + time * 0.63));
+    let breakup_zone = smoothstep(0.48, 0.96, in.uv.y);
+    let edge_loss = smoothstep(0.55, 1.0, abs(in.uv.x * 2.0 - 1.0)) * breakup_zone;
+    let holes = mix(0.0, 0.64, breakup_zone) + edge_loss * 0.18;
+    if breakup_zone > 0.03 && breakup_field < holes {
+        discard;
+    }
     let alpha = clamp(
-        0.06 + optical * 0.36 + fresnel * 0.30 + aeration * 0.50 + edge * 0.08,
-        0.04, 0.94
+        (0.025 + optical * 0.23 + fresnel * 0.24 + aeration * 0.46 + edge * 0.04)
+            * (1.0 - edge_loss * 0.65),
+        0.02, 0.90
     );
     return vec4<f32>(color, alpha);
 }
