@@ -580,10 +580,7 @@ impl Renderer {
             pass.set_bind_group(1, &self.targets.water_inputs, &[]);
             pass.set_bind_group(2, self.flow.binding(), &[]);
             self.water.encode(&mut pass, detailed || secondary_detailed, 1 + u32::from(secondary_water.is_some()));
-            if water.waterfall.is_some() {
-                pass.set_bind_group(2, self.flow.upper_binding(), &[]);
             self.particle_fluid.encode(&mut pass);
-            }
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
