@@ -6,7 +6,7 @@ use gigantomachia::{
     mesh::{Mesh, Vertex},
     render::EngineResult,
     scene::{MeshInstance, Scene, Sun},
-    water::{Water, WaterBounds, WaterStyle, Waterfall},
+    water::{Water, WaterBounds, WaterStyle},
 };
 use glam::{Vec2, Vec3};
 use std::sync::Arc;
@@ -73,7 +73,7 @@ fn main() -> EngineResult<()> {
         Vec3::new(3.82, 0.33, 0.09),
         [0.46, 0.24, 0.085],
     )?);
-    // A central opening in the front rim lets the visual water sheet clear the board edge.
+    // A central opening in the front rim is physical geometry; 3D water will discover it through collision.
     for x in [-2.31, 2.31] {
         meshes.push(cuboid(
             Vec3::new(x, 1.55, 2.41),
@@ -127,12 +127,6 @@ fn main() -> EngineResult<()> {
         water: Some(Water {
             bounds: Some(WaterBounds::new(Vec2::ZERO, Vec2::new(3.82, 2.32))?),
             level: 1.55,
-            waterfall: Some(Waterfall::new(
-                Vec3::new(0.0, 1.55, 2.31),
-                Vec2::Y,
-                0.72,
-                1.515,
-            )?),
             amplitude: 0.025,
             style: WaterStyle::Realistic,
             ripple_strength: 2.0,
