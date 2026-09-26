@@ -180,9 +180,18 @@ fn clear_emit_counter(@builtin(global_invocation_id) id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn emit_inactive(@builtin(global_invocation_id) id: vec3<u32>) {
     let i=id.x;
-    if i>=p.counts.y || src[i].w>=0.5 || dst[i].w>=0.5 { return; }
+    if i>=p.counts.y { return; }
+    if src[i].w>=0.5 {
+        dst[i]=src[i];
+        vel_dst[i]=vel_src[i];
+        return;
+    }
     let ticket=atomicAdd(&grid_counts[0],1u);
-    if ticket>=p.counts.z { return; }
+    if ticket>=p.counts.z {
+        dst[i]=vec4<f32>(0.0);
+        vel_dst[i]=vec4<f32>(0.0);
+        return;
+    }
     let fx=f32(i%32u)/31.0;
     let fy=f32((i/32u)%8u)/7.0;
     let fz=f32((i/256u)%16u)/15.0;
