@@ -77,26 +77,17 @@ fn compute_density(@builtin(global_invocation_id) id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     let i=id.x; if i>=p.counts.y { return; }
-    let fx=f32(i%32u)/31.0; let fy=f32((i/32u)%8u)/7.0; let fz=f32((i/256u)%16u)/15.0;
-    let spawn=mix(p.emitter_min.xyz,p.emitter_max.xyz,vec3<f32>(fx,fy,fz));
-    var pos=src[i].xyz; var vel=vel_src[i].xyz;
-    // Only inactive slots may be emitted. The CPU supplies a per-frame budget in counts.z.
-    // Selecting the first inactive indices is deterministic and, unlike the old ring cursor,
-    // never overwrites a live particle.
-    let emit_now=src[i].w<0.5 && i<p.counts.z;
-    if emit_now {
-        pos=spawn;
-        vel=p.emitter_velocity.xyz;
-    } else if src[i].w<0.5 {
+    if src[i].w<0.5 {
         dst[i]=vec4<f32>(0.0);
         vel_dst[i]=vec4<f32>(0.0);
         return;
     }
+    var pos=src[i].xyz; var vel=vel_src[i].xyz;
 
     // Weakly-compressible SPH pressure. Density is dimensionless for now because the
     // kernel is normalized only relative to particle spacing; rest density therefore
     // uses the same scale instead of pretending to be kg/m^3.
-    if src[i].w>=0.5 && !emit_now {
+    if src[i].w>=0.5 {
         let xi=src[i].xyz;
         let base=vec3<i32>(floor((xi-GRID_ORIGIN)/CELL_SIZE));
         let h=CELL_SIZE;
@@ -166,4 +157,24 @@ fn cs_main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     if pos.y < -0.5 || abs(pos.x)>12.0 || abs(pos.z)>14.0 { dst[i]=vec4<f32>(0.0); vel_dst[i]=vec4<f32>(0.0); return; }
     dst[i]=vec4<f32>(pos,1.0); vel_dst[i]=vec4<f32>(vel,0.0);
+}
+
+
+@compute @workgroup_size(1)
+fn clear_emit_counter(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x==0u { atomicStore(&grid_counts[0],0u); }
+}
+
+@compute @workgroup_size(64)
+fn emit_inactive(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i=id.x;
+    if i>=p.counts.y || src[i].w>=0.5 || dst[i].w>=0.5 { return; }
+    let ticket=atomicAdd(&grid_counts[0],1u);
+    if ticket>=p.counts.z { return; }
+    let fx=f32(i%32u)/31.0;
+    let fy=f32((i/32u)%8u)/7.0;
+    let fz=f32((i/256u)%16u)/15.0;
+    let spawn=mix(p.emitter_min.xyz,p.emitter_max.xyz,vec3<f32>(fx,fy,fz));
+    dst[i]=vec4<f32>(spawn,1.0);
+    vel_dst[i]=vec4<f32>(p.emitter_velocity.xyz,0.0);
 }
