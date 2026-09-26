@@ -88,12 +88,12 @@ fn corner(index: u32) -> vec2<f32> {
         let t = uv.y * flight;
         let speed = 1.3 + 9.81 * t;
 
-        let macro = fbm(vec2<f32>(uv.x * 3.1 + time * 0.12, uv.y * 1.7 - time * 0.19));
+        let macro_flow = fbm(vec2<f32>(uv.x * 3.1 + time * 0.12, uv.y * 1.7 - time * 0.19));
         let turbulent = fbm(vec2<f32>(uv.x * 12.0 - time * 0.31, uv.y * 5.0 + time * 0.42));
         let breakup = smoothstep(0.32, 0.98, uv.y) * turbulent;
         let edge = abs(uv.x * 2.0 - 1.0);
 
-        let local_width = width * mix(0.86, 1.08, macro) * (1.0 - 0.10 * uv.y);
+        let local_width = width * mix(0.86, 1.08, macro_flow) * (1.0 - 0.10 * uv.y);
         let wander = (macro - 0.5) * width * 0.10 + (turbulent - 0.5) * width * 0.035 * uv.y;
         let forward_noise = (turbulent - 0.5) * 0.055 * sin(uv.y * PI);
 
@@ -112,7 +112,7 @@ fn corner(index: u32) -> vec2<f32> {
             + smoothstep(0.72, 1.0, edge) * 0.20,
             0.0, 1.0
         );
-        out.thickness = mix(0.20, 0.055, uv.y) * mix(0.72, 1.28, macro);
+        out.thickness = mix(0.20, 0.055, uv.y) * mix(0.72, 1.28, macro_flow);
     // Secondary spray. Billboards are stretched along the ballistic velocity so they
     // read as droplets/ligaments instead of round game particles.
     } else {
