@@ -23,9 +23,10 @@ struct Params {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct GpuAabb {
-    min: [f32; 4],
-    max: [f32; 4],
+struct GpuCollider {
+    center: [f32; 4],
+    half: [f32; 4],
+    rotation: [f32; 4],
 }
 
 pub(super) struct ParticleFluid {
@@ -58,7 +59,7 @@ impl ParticleFluid {
         let pa=make("fluid-particle-pos-a",&pos); let pb=make("fluid-particle-pos-b",&pos);
         let va=make("fluid-particle-vel-a",&vel); let vb=make("fluid-particle-vel-b",&vel);
         let params=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("fluid-particle-params"),size:std::mem::size_of::<Params>() as u64,usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
-        let colliders=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("fluid-colliders"),size:(MAX_COLLIDERS*std::mem::size_of::<GpuAabb>()) as u64,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
+        let colliders=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("fluid-colliders"),size:(MAX_COLLIDERS*std::mem::size_of::<GpuCollider>()) as u64,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
         let grid_counts=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("fluid-grid-counts"),size:(GRID_CELLS*4) as u64,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
         let grid_particles=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("fluid-grid-particles"),size:(GRID_CELLS*CELL_CAPACITY*4) as u64,usage:wgpu::BufferUsages::STORAGE,mapped_at_creation:false});
         let density=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("fluid-density"),size:(PARTICLE_COUNT*4) as u64,usage:wgpu::BufferUsages::STORAGE,mapped_at_creation:false});
@@ -94,8 +95,11 @@ impl ParticleFluid {
         let mut gpu_colliders=Vec::with_capacity(world.colliders.len().min(MAX_COLLIDERS));
         for collider in world.colliders.iter().take(MAX_COLLIDERS) {
             let FluidCollider::Box(bounds)=*collider;
-            let min=bounds.min(); let max=bounds.max();
-            gpu_colliders.push(GpuAabb{min:[min.x,min.y,min.z,0.0],max:[max.x,max.y,max.z,0.0]});
+            gpu_colliders.push(GpuCollider{
+                center:[bounds.center.x,bounds.center.y,bounds.center.z,0.0],
+                half:[bounds.half_extent.x,bounds.half_extent.y,bounds.half_extent.z,0.0],
+                rotation:bounds.rotation.to_array(),
+            });
         }
         if !gpu_colliders.is_empty(){gpu.queue.write_buffer(&self.colliders,0,bytemuck::cast_slice(&gpu_colliders));}
         let min=emitter.volume.min(); let max=emitter.volume.max();
