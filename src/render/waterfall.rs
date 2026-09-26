@@ -5,14 +5,19 @@ pub(super) struct WaterfallPass {
     pipeline: wgpu::RenderPipeline,
 }
 impl WaterfallPass {
-    pub fn new(\n        gpu: &Gpu,\n        layout: &wgpu::BindGroupLayout,\n        inputs: &wgpu::BindGroupLayout,\n    ) -> Self {
+    pub fn new(
+        gpu: &Gpu,
+        layout: &wgpu::BindGroupLayout,
+        inputs: &wgpu::BindGroupLayout,
+    ) -> Self {
         let shader = gpu
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("waterfall-shader"),
                 source: wgpu::ShaderSource::Wgsl(
                     format!(
-                        "{}\n{}",
+                        "{}
+{}",
                         include_str!("../shaders/common.wgsl"),
                         include_str!("../shaders/waterfall.wgsl")
                     )
