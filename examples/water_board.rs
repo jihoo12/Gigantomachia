@@ -125,9 +125,7 @@ fn main() -> EngineResult<()> {
             ..Default::default()
         },
         water: Some(Water {
-            // Extend the bounded surface through the lower receiving channel. The shader
-            // clips the high/low portions around the spill so this reads as one continuous flow.
-            bounds: Some(WaterBounds::new(Vec2::new(0.0, 2.45), Vec2::new(3.82, 4.77))?),
+            bounds: Some(WaterBounds::new(Vec2::ZERO, Vec2::new(3.82, 2.32))?),
             level: 1.55,
             waterfall: Some(Waterfall::new(
                 Vec3::new(0.0, 1.55, 2.31),
@@ -140,6 +138,19 @@ fn main() -> EngineResult<()> {
             ripple_strength: 2.0,
             roughness: 0.26,
             foam_strength: 0.0,
+            ..Default::default()
+        }),
+        secondary_water: Some(Water {
+            bounds: Some(WaterBounds::new(Vec2::new(0.0, 5.25), Vec2::new(2.22, 3.00))?),
+            level: 0.16,
+            amplitude: 0.018,
+            time: 0.0,
+            style: WaterStyle::Realistic,
+            ripple_strength: 1.45,
+            roughness: 0.31,
+            foam_strength: 0.12,
+            foam_width: 0.35,
+            reflections: false,
             ..Default::default()
         }),
     };
