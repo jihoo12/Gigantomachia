@@ -130,7 +130,7 @@ fn main() -> EngineResult<()> {
             waterfall: Some(Waterfall::new(
                 Vec3::new(0.0, 1.55, 2.31),
                 Vec2::Y,
-                1.55,
+                0.72,
                 1.515,
             )?),
             amplitude: 0.025,
