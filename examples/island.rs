@@ -22,6 +22,7 @@ fn main() -> EngineResult<()> {
             amplitude: 0.55,
             ..Default::default()
         }),
-    };
+        secondary_water: None,
+};
     support::run(support::Demo::new("Island", scene, Some(island)))
 }
