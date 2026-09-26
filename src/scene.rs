@@ -1,6 +1,6 @@
 //! Renderable scene data. No window, GPU, or demo controls are stored here.
 
-use crate::{camera::Camera, mesh::Mesh, render::EngineResult, water::Water};
+use crate::{camera::Camera, fluid::FluidWorld, mesh::Mesh, render::EngineResult, water::Water};
 use glam::{Mat4, Vec3};
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub struct Scene {
     pub camera: Camera,
     pub meshes: Vec<MeshInstance>,
+    pub fluid: Option<FluidWorld>,
     pub water: Option<Water>,
     /// Optional second water plane, used for receiving pools/channels below a waterfall.
     pub secondary_water: Option<Water>,
