@@ -275,13 +275,16 @@ fn corner(index: u32) -> vec2<f32> {
     let coverage_noise = fbm(vec2<f32>(in.uv.x * 18.0 + time * 0.17, in.uv.y * 4.5 - time * 0.24));
     let threshold = mix(0.30, 0.48, smoothstep(0.15, 0.95, in.uv.y));
     let holes = 1.0 - smoothstep(threshold - 0.10, threshold + 0.08, discharge * (0.82 + 0.28 * coverage_noise));
-    if breakup_zone > 0.03 && breakup_field < holes {
+    // 'holes' is now the dry-band probability itself, so it replaces the old
+    // breakup_zone/edge_loss controls that belonged to the single-curtain model.
+    if breakup_field < holes {
         discard;
     }
+    let wet_coverage = 1.0 - holes;
     let alpha = clamp(
-        (0.025 + optical * 0.23 + fresnel * 0.24 + aeration * 0.46 + edge * 0.04)
-            * (1.0 - edge_loss * 0.65),
-        0.02, 0.90
+        (0.025 + optical * 0.23 + fresnel * 0.24 + aeration * 0.34 + edge * 0.03)
+            * mix(0.45, 1.0, wet_coverage),
+        0.015, 0.84
     );
     return vec4<f32>(color, alpha);
 }
