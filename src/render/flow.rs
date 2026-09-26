@@ -19,7 +19,7 @@ impl FluidSimulation {
  ]})}
  pub fn new(gpu:&Gpu,layout:&wgpu::BindGroupLayout)->Self {
   let zero=vec![[0.0f32;4];(FLOW_W*FLOW_H) as usize];
-  let make=|label|gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:Some(label),contents:bytemuck::cast_slice(&zero),usage:wgpu::BufferUsages::STORAGE});
+  let make=|label|gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:Some(label),contents:bytemuck::cast_slice(&zero),usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC});
   let a=make("water-flow-a"); let b=make("water-flow-b");
   let upper_a=make("water-upper-flow-a"); let upper_b=make("water-upper-flow-b");
   let params=gpu.device.create_buffer(&wgpu::BufferDescriptor{label:Some("water-flow-params"),size:std::mem::size_of::<FlowParams>() as u64,usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
