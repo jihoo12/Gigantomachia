@@ -73,8 +73,8 @@ impl WaterfallPass {
     }
     pub fn encode(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.pipeline);
-        // The receiving-water disk is deliberately gone: impact response now belongs to
-        // the fluid domain. Draw only the continuous free-fall surface and spray.
-        pass.draw((96 * 3)..(96 * 3 + 32 * 32 * 6 + 384 * 6), 0..1);
+        // One ribbon per lip cell. There is no prebuilt waterfall sheet and no scripted spray:
+        // each ribbon exists only when its source cell carries outward fluid flux.
+        pass.draw(0..(64 * 16 * 6), 0..1);
     }
 }
