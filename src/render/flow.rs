@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 pub(super) const FLOW_W: u32 = 64;
 pub(super) const FLOW_H: u32 = 128;
 #[repr(C)] #[derive(Clone, Copy, Pod, Zeroable)]
-struct FlowParams { bounds:[f32;4], source:[f32;4], direction:[f32;4] }
+struct FlowParams { bounds:[f32;4], source:[f32;4], direction:[f32;4], upper:[f32;4], outlet:[f32;4] }
 pub(super) struct FluidSimulation { pipeline:wgpu::ComputePipeline, bind_groups:[wgpu::BindGroup;2], params:wgpu::Buffer, current:usize }
 impl FluidSimulation {
  pub fn layout(gpu:&Gpu)->wgpu::BindGroupLayout { gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:Some("water-flow-layout"),entries:&[
@@ -33,7 +33,15 @@ impl FluidSimulation {
  pub fn update(&mut self,gpu:&Gpu,encoder:&mut wgpu::CommandEncoder,scene:&crate::scene::Scene){
   let (Some(lower),Some(upper))=(scene.secondary_water,scene.water) else{return}; let Some(bounds)=lower.bounds else{return}; let Some(fall)=upper.waterfall else{return};
   let dir=fall.direction.normalize_or_zero(); let flight=(2.0*fall.drop.max(0.05)/9.81).sqrt(); let landing=glam::Vec2::new(fall.origin.x, fall.origin.z)+dir*(0.22+1.3*flight);
-  let p=FlowParams{bounds:[bounds.center.x,bounds.center.y,bounds.half_extent.x,bounds.half_extent.y],source:[landing.x,landing.y,(fall.width*0.34).max(0.16),1.0],direction:[dir.x,dir.y,1.0/60.0,lower.time]};
+  let upper_bounds=upper.bounds.unwrap_or(bounds);
+  let p=FlowParams{
+   bounds:[bounds.center.x,bounds.center.y,bounds.half_extent.x,bounds.half_extent.y],
+   source:[landing.x,landing.y,(fall.width*0.34).max(0.16),1.0],
+   direction:[dir.x,dir.y,1.0/60.0,lower.time],
+   upper:[upper_bounds.center.x,upper_bounds.center.y,upper_bounds.half_extent.x,upper_bounds.half_extent.y],
+   // outlet.xy is the physical lip; z is half-width and w is nominal depth.
+   outlet:[fall.origin.x,fall.origin.z,(fall.width*0.5).max(0.025),0.055],
+  };
   gpu.queue.write_buffer(&self.params,0,bytemuck::bytes_of(&p));
   let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor{label:Some("water-flow-simulation"),timestamp_writes:None}); pass.set_pipeline(&self.pipeline); pass.set_bind_group(0,&self.bind_groups[self.current],&[]); pass.dispatch_workgroups(FLOW_W.div_ceil(8),FLOW_H.div_ceil(8),1); drop(pass); self.current^=1;
  }
