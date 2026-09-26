@@ -9,6 +9,8 @@ pub struct Scene {
     pub camera: Camera,
     pub meshes: Vec<MeshInstance>,
     pub water: Option<Water>,
+    /// Optional second water plane, used for receiving pools/channels below a waterfall.
+    pub secondary_water: Option<Water>,
     pub sun: Sun,
 }
 
