@@ -195,7 +195,8 @@ fn opaque_meshes_and_water_share_depth() -> EngineResult<()> {
         sun: Default::default(),
         meshes: vec![object],
         water: None,
-    };
+        secondary_water: None,
+};
     let land = frame(&gpu, &mut renderer, &target, &scene)?;
     scene.water = Some(Water {
         refraction: false,
