@@ -331,7 +331,7 @@ impl Renderer {
             waterfall: waterfall::WaterfallPass::new(gpu, &layout, &water_layout, &flow_layout),
             water: WaterPass::new(gpu, HDR_FORMAT, &layout, &water_layout, &flow_layout),
             flow: flow::FluidSimulation::new(gpu, &flow_layout),
-            particle_fluid: fluid_particles::ParticleFluid::new(gpu),
+            particle_fluid: fluid_particles::ParticleFluid::new(gpu, &layout),
             meshes: MeshPass::new(gpu, HDR_FORMAT, &layout, &shadow_layout),
             post: pipeline(
                 gpu,
@@ -594,6 +594,7 @@ impl Renderer {
             if water.waterfall.is_some() {
                 pass.set_bind_group(2, self.flow.upper_binding(), &[]);
                 self.waterfall.encode(&mut pass);
+            self.particle_fluid.encode(&mut pass);
             }
         }
         {
